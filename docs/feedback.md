@@ -28,7 +28,7 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Add a visible gutter marker (e.g. `▶`) beside the selected hunk header
 - Show a persistent "Hunk N of M" indicator in the status bar or panel title
 
-**Priority:** Relatively quick win; improves discoverability significantly.
+**Resolved:** Added bold yellow `▶` marker to the selected hunk header; non-selected hunks are indented with two spaces to maintain alignment. Panel title now shows `filename — N/M` hunk position at all times.
 
 ---
 
@@ -41,7 +41,7 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Horizontal scroll support
 - Truncate with a visible `…` indicator and allow horizontal scroll to reveal the rest
 
-**Priority:** Can be blocking on repos with long lines (SQL, generated code, long strings).
+**Resolved:** Enabled soft wrapping (`Wrap { trim: false }`) so long lines wrap at the panel boundary with indentation preserved. Note: scroll offset is based on logical line count, so hunk-jump positioning may be slightly imprecise on files with many very long lines.
 
 ---
 
@@ -65,7 +65,7 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Navigate to a submitted note (◎ marker) and press `e` to edit or `d` to delete
 - Show a notes list view accessible via a keybind
 
-**Priority:** Medium. Annoying in practice but workaround exists (quit and re-review).
+**Resolved:** `e` re-opens the comment input pre-populated with the existing text; `d` deletes it immediately. Status bar shows these hints contextually when the current hunk has a note.
 
 ---
 
@@ -82,7 +82,7 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Add a brief preamble: e.g. "The following are code review notes from a human reviewer. Please address each item." (possibly configurable or suppressible)
 - Reconsider whether including the full hunk code block adds value or is noise for the agent
 
-**Priority:** High — this is the primary output of the tool and directly affects agent usability.
+**Resolved:** Title replaced with a plain preamble directing the agent. File and hunk merged onto one header line. Code block uses `diff` fence for syntax highlighting. Human note rendered as a blockquote (`> **Human:** ...`) to visually separate it from the diff content.
 
 ---
 

@@ -121,8 +121,12 @@ delta main > review.md
 | `↑` / `↓` | Scroll |
 | `[` / `]` | Previous / next hunk |
 | `c` | Add comment to current hunk |
+| `e` | Edit existing comment on current hunk |
+| `d` | Delete existing comment on current hunk |
 | `Tab` | Switch to file list |
 | `q` | Quit and export feedback |
+
+The panel title shows the current file and hunk position (`filename — 2/5`). The status bar shows `e: edit  d: delete` when the current hunk already has a comment, and `c: comment` otherwise.
 
 ### Comment input
 
@@ -138,18 +142,18 @@ delta main > review.md
 ### Markdown (default)
 
 ```markdown
-# Delta Review
+The following are code review notes from a human reviewer. Please address each item before proceeding.
 
-## `src/auth.rs`
+---
 
-**Hunk:** `@@ -42,6 +42,9 @@`
+## `src/auth.rs` · `@@ -42,6 +42,9 @@`
 
-\```
+\```diff
 -    log::debug!("token: {}", token);
 +    log::debug!("authenticated");
 \```
 
-**Feedback:** The refresh token was being logged in plaintext. Make sure no other sensitive fields are logged nearby.
+> **Human:** The refresh token was being logged in plaintext. Make sure no other sensitive fields are logged nearby.
 
 ---
 ```

@@ -48,6 +48,13 @@ This document tracks implementation status. Check items off as they are complete
 
 ---
 
+## TUI — Layout & Navigation (additional)
+- [x] Soft line wrapping in diff view (preserves indentation, no truncation)
+- [x] Selected hunk indicator: `▶` marker on active hunk header
+- [x] Panel title shows `filename — N/M` hunk position counter
+
+---
+
 ## TUI — Comment Flow
 - [x] `c` enters comment mode on current hunk
 - [x] Inline comment input renders below hunk with cursor indicator
@@ -55,6 +62,9 @@ This document tracks implementation status. Check items off as they are complete
 - [x] Enter submits comment; Esc cancels
 - [x] Submitted notes display inline in diff (◎ marker)
 - [x] Note dot marker (●) in file list for files with notes
+- [x] `e` edits existing comment (re-opens input pre-populated with old text)
+- [x] `d` deletes existing comment on current hunk
+- [x] Status bar shows `e: edit  d: delete` contextually when hunk has a note
 - [ ] Multi-line comment input (currently single-line only; post-MVP)
 
 ---
@@ -71,10 +81,11 @@ This document tracks implementation status. Check items off as they are complete
 
 ## Tests
 - [x] `diff.rs`: 13 unit tests (hunk header parsing, diff parsing, line kinds, line numbers)
-- [x] `app.rs`: 30 unit tests (file navigation, hunk navigation, scroll capping, hunk offset, comment flow, state transitions)
-- [x] `export.rs`: 11 unit tests (markdown format, JSON format, empty cases)
-- [x] `git.rs`: 7 unit tests (name-status parsing, edge cases)
-- [x] Integration tests: fixture git repo in `tests/common/mod.rs` with 2-commit history (M, A, D, M); 18 tests covering git layer, parse pipeline, and full app→export flow
+- [x] `app.rs`: 41 unit tests (file navigation, hunk navigation, scroll, hunk offset, comment flow, edit/delete notes)
+- [x] `export.rs`: 15 unit tests (markdown format, JSON format, preamble, blockquote, diff fence)
+- [x] `git.rs`: 8 unit tests (name-status parsing, rename path extraction)
+- [x] `ui.rs`: 5 unit tests (hunk marker presence, position, indent, loading state)
+- [x] Integration tests: 19 tests — fixture git repo (M, A, D, R), git layer, parse pipeline, full app→export flow
 
 ---
 
@@ -88,9 +99,11 @@ This document tracks implementation status. Check items off as they are complete
 ## Post-MVP (not scheduled)
 - [ ] Syntax highlighting in diff view (syntect crate)
 - [ ] Context line folding (collapse unchanged regions)
-- [ ] Renamed file: display old→new path
+- [ ] Renamed file: display old→new path in file list
 - [ ] Mouse support
 - [ ] Performance: background-load remaining file diffs
 - [ ] Performance: virtualized rendering for very large diffs
 - [ ] `similar` crate for inline word-level diff highlighting
-- [ ] Integration tests with fixture git repo
+- [ ] Side-by-side diff view
+- [ ] Multi-line comment input
+- [ ] Arbitrary range comparison (`delta <from> <to>`)
