@@ -23,10 +23,13 @@ pub enum Mode {
         input: String,
         /// Byte offset of the insertion cursor, always on a char boundary.
         cursor: usize,
+        /// The note being replaced, if this is an edit rather than a new comment.
+        /// Restored on Esc so cancelling an edit never loses the original.
+        original: Option<FeedbackNote>,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FeedbackNote {
     pub file: PathBuf,
     pub hunk_header: String,
@@ -255,17 +258,22 @@ impl App {
             .iter()
             .find(|n| n.file == file && n.hunk_header == header)
             .map(|n| n.note.clone());
-        if let Some(text) = existing {
+        if let Some(original) = self.notes.iter()
+            .find(|n| n.file == file && n.hunk_header == header)
+            .cloned()
+        {
             self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
             self.expanded_notes.clear();
             if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
                 self.selected_note = self.notes.len() - 1;
             }
-            let cursor = text.len();
+            let cursor = original.note.len();
+            let input = original.note.clone();
             self.mode = Mode::Comment {
                 hunk_idx: self.selected_hunk,
-                input: text,
+                input,
                 cursor,
+                original: Some(original),
             };
         }
     }
@@ -279,6 +287,7 @@ impl App {
                     hunk_idx: self.selected_hunk,
                     input: String::new(),
                     cursor: 0,
+                    original: None,
                 };
             }
         }
@@ -318,6 +327,12 @@ impl App {
     }
 
     pub fn cancel_comment(&mut self) {
+        // If editing an existing note, restore the original so Esc never loses it.
+        if let Mode::Comment { ref original, .. } = self.mode.clone() {
+            if let Some(note) = original.clone() {
+                self.notes.push(note);
+            }
+        }
         self.mode = Mode::Normal;
     }
 }
@@ -551,12 +566,31 @@ mod tests {
     }
 
     #[test]
+    fn test_cancel_edit_restores_original_note() {
+        let mut app = app_with_note_on_hunk(0);
+        app.edit_note_for_current_hunk();
+        // Escape without submitting — original note must be restored
+        app.cancel_comment();
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.notes[0].note, "original note");
+    }
+
+    #[test]
+    fn test_cancel_new_comment_does_not_create_note() {
+        let mut app = app_with_diff(1);
+        app.start_comment();
+        app.cancel_comment();
+        assert!(app.notes.is_empty());
+    }
+
+    #[test]
     fn test_submit_comment_creates_note() {
         let mut app = app_with_diff(1);
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "This looks wrong".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
 
@@ -572,6 +606,7 @@ mod tests {
             hunk_idx: 0,
             input: "some note".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         assert_eq!(app.mode, Mode::Normal);
@@ -584,6 +619,7 @@ mod tests {
             hunk_idx: 0,
             input: "   ".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         assert!(app.notes.is_empty());
@@ -596,6 +632,7 @@ mod tests {
             hunk_idx: 0,
             input: "check this".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
 
@@ -613,6 +650,7 @@ mod tests {
             hunk_idx: 1,
             input: "note on second hunk".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
 
@@ -648,7 +686,7 @@ mod tests {
     fn test_hunk_scroll_offset_accounts_for_notes() {
         let mut app = app_with_diff(2);
         // Add a note on hunk 0
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0 };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
         app.submit_comment();
         // hunk 0: 1 header + 3 lines + 1 note + 1 blank = 6
         assert_eq!(app.hunk_scroll_offset(1), 6);
@@ -723,6 +761,7 @@ mod tests {
             hunk_idx,
             input: "original note".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         app.selected_hunk = hunk_idx;
@@ -760,7 +799,7 @@ mod tests {
         // Add notes on hunks 0 and 1
         for hunk_idx in [0, 1] {
             app.selected_hunk = hunk_idx;
-            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0 };
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0, original: None };
             app.submit_comment();
         }
         // Delete note on hunk 0 only
@@ -832,6 +871,7 @@ mod tests {
             hunk_idx: 0,
             input: "line one\nline two\nline three".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two\nline three");
@@ -844,6 +884,7 @@ mod tests {
             hunk_idx: 0,
             input: "\n\nline one\nline two\n\n".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two");
@@ -856,6 +897,7 @@ mod tests {
             hunk_idx: 0,
             input: "\n\n\n".to_string(),
             cursor: 0,
+            original: None,
         };
         app.submit_comment();
         assert!(app.notes.is_empty(), "all-whitespace multi-line input should not create a note");
@@ -933,11 +975,11 @@ mod tests {
     fn app_with_two_file_notes() -> App {
         let mut app = app_with_diff(2);
         // Note on hunk 0
-        app.mode = Mode::Comment { hunk_idx: 0, input: "first note".to_string(), cursor: 0 };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "first note".to_string(), cursor: 0, original: None };
         app.submit_comment();
         // Note on hunk 1
         app.selected_hunk = 1;
-        app.mode = Mode::Comment { hunk_idx: 1, input: "second note".to_string(), cursor: 0 };
+        app.mode = Mode::Comment { hunk_idx: 1, input: "second note".to_string(), cursor: 0, original: None };
         app.submit_comment();
         app.selected_note = 0;
         app

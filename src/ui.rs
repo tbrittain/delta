@@ -157,7 +157,7 @@ fn run_event_loop<G: GitBackend>(
                 }
             }
 
-            Mode::Comment { mut input, hunk_idx, mut cursor } => match key.code {
+            Mode::Comment { mut input, hunk_idx, mut cursor, original } => match key.code {
                 // Ctrl+D submits — Ctrl+Enter is indistinguishable from Enter
                 // in most terminal emulators so we use Ctrl+D ("done") instead.
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -166,15 +166,15 @@ fn run_event_loop<G: GitBackend>(
                 KeyCode::Enter => {
                     input.insert(cursor, '\n');
                     cursor += 1;
-                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                    app.mode = Mode::Comment { hunk_idx, input, cursor, original };
                 }
                 KeyCode::Left => {
                     cursor = cursor_prev(&input, cursor);
-                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                    app.mode = Mode::Comment { hunk_idx, input, cursor, original };
                 }
                 KeyCode::Right => {
                     cursor = cursor_next(&input, cursor);
-                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                    app.mode = Mode::Comment { hunk_idx, input, cursor, original };
                 }
                 KeyCode::Esc => app.cancel_comment(),
                 KeyCode::Backspace => {
@@ -183,12 +183,12 @@ fn run_event_loop<G: GitBackend>(
                         input.drain(prev..cursor);
                         cursor = prev;
                     }
-                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                    app.mode = Mode::Comment { hunk_idx, input, cursor, original };
                 }
                 KeyCode::Char(c) => {
                     input.insert(cursor, c);
                     cursor += c.len_utf8();
-                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                    app.mode = Mode::Comment { hunk_idx, input, cursor, original };
                 }
                 _ => {}
             },
@@ -450,6 +450,7 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
             hunk_idx: cidx,
             ref input,
             cursor,
+            ..
         } = app.mode
         {
             if cidx == hunk_idx {
@@ -605,6 +606,7 @@ mod tests {
             hunk_idx: 0,
             input: "line one\nline two\nline three".to_string(),
             cursor: 0,
+            original: None,
         };
         let text = build_diff_text(&app);
         let content = text_to_string(&text);
@@ -618,7 +620,7 @@ mod tests {
         let mut app = make_app_with_hunks(1);
         let input = "line one\nline two".to_string();
         let cursor = input.len(); // cursor at end — after "line two"
-        app.mode = Mode::Comment { hunk_idx: 0, input, cursor };
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None };
         let text = build_diff_text(&app);
         // Cursor █ should appear exactly once, on the last visual line
         let content = text_to_string(&text);
@@ -635,6 +637,7 @@ mod tests {
             hunk_idx: 0,
             input: "first\nsecond".to_string(),
             cursor: 0,
+            original: None,
         };
         let text = build_diff_text(&app);
         let content = text_to_string(&text);

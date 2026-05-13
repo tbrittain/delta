@@ -45,6 +45,19 @@ Left/Right arrows move one character at a time. There is no word-jump (`Ctrl+←
 
 ---
 
+### Enter keybind is counterintuitive for users expecting cancel
+
+**Observed:** When editing a comment, pressing `Enter` expecting it to cancel/revert changes instead inserts a newline. Users coming from contexts where Enter = confirm/cancel may be surprised.
+
+**Note:** Pressing `Esc` after `Enter` inserts a newline does not help recover — `Esc` cancels the whole session. This was previously a data-loss bug (Esc during an edit permanently deleted the original note); that bug is now fixed — `Esc` always restores the original note.
+
+**Possible directions:**
+- Better onboarding: ensure the status bar is prominent enough that `Ctrl+D: submit` is seen before the user presses Enter
+
+**Priority:** Low — status bar documents the keybinds clearly. More of a first-use surprise.
+
+---
+
 ### No multi-line visual scrolling in comment input
 
 The comment input renders inline in the diff view and does not scroll independently. For very long multi-line notes, the input area may push other content off screen.
