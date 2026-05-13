@@ -225,11 +225,19 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
-    let title = app
-        .files
-        .get(app.selected_file)
-        .map(|f| format!(" {} ", f.path.display()))
-        .unwrap_or_else(|| " Diff ".to_string());
+    let title = {
+        let file_name = app
+            .files
+            .get(app.selected_file)
+            .map(|f| f.path.display().to_string())
+            .unwrap_or_else(|| "Diff".to_string());
+        match &app.current_diff {
+            Some(diff) if !diff.hunks.is_empty() => {
+                format!(" {} — {}/{} ", file_name, app.selected_hunk + 1, diff.hunks.len())
+            }
+            _ => format!(" {} ", file_name),
+        }
+    };
 
     let text = build_diff_text(app);
 
@@ -275,10 +283,20 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
         } else {
             Style::default().fg(Color::Cyan)
         };
-        lines.push(Line::from(Span::styled(
-            hunk.header.clone(),
-            header_style,
-        )));
+        let marker_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        if is_selected {
+            lines.push(Line::from(vec![
+                Span::styled("▶ ", marker_style),
+                Span::styled(hunk.header.clone(), header_style),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(hunk.header.clone(), header_style),
+            ]));
+        }
 
         for diff_line in &hunk.lines {
             let (prefix, style) = match diff_line.kind {
@@ -333,6 +351,117 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
     }
 
     Text::from(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use std::path::PathBuf;
+
+    fn make_app_with_hunks(hunk_count: usize) -> App {
+        let files = vec![ChangedFile {
+            path: PathBuf::from("src/main.rs"),
+            status: FileStatus::Modified,
+        }];
+        let mut app = App::new(files.clone(), "main".to_string());
+        app.focused_panel = Panel::DiffView;
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: (0..hunk_count)
+                .map(|i| Hunk {
+                    header: format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1),
+                    old_start: (i * 10 + 1) as u32,
+                    new_start: (i * 10 + 1) as u32,
+                    lines: vec![
+                        DiffLine {
+                            old_lineno: None,
+                            new_lineno: Some(1),
+                            kind: LineKind::Added,
+                            content: "new line".to_string(),
+                        },
+                        DiffLine {
+                            old_lineno: Some(1),
+                            new_lineno: None,
+                            kind: LineKind::Removed,
+                            content: "old line".to_string(),
+                        },
+                    ],
+                })
+                .collect(),
+        });
+        app
+    }
+
+    fn text_to_string(text: &Text<'static>) -> String {
+        text.lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn test_selected_hunk_has_marker() {
+        let app = make_app_with_hunks(2);
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("▶ "), "selected hunk should have ▶ marker");
+    }
+
+    #[test]
+    fn test_non_selected_hunk_has_no_marker() {
+        let mut app = make_app_with_hunks(2);
+        app.selected_hunk = 0;
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        // Only one ▶ should appear (for hunk 0), not two
+        assert_eq!(content.matches("▶").count(), 1);
+    }
+
+    #[test]
+    fn test_selecting_second_hunk_moves_marker() {
+        let mut app = make_app_with_hunks(2);
+        app.selected_hunk = 1;
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert_eq!(content.matches("▶").count(), 1);
+        // The text immediately after "▶ " should be the second hunk's header
+        let marker_pos = content.find("▶").unwrap();
+        let after_marker = &content[marker_pos + "▶ ".len()..];
+        assert!(
+            after_marker.starts_with("@@ -11,"),
+            "▶ marker should immediately precede the second hunk header, got: {:?}",
+            &after_marker[..after_marker.len().min(20)]
+        );
+    }
+
+    #[test]
+    fn test_non_selected_headers_have_indent() {
+        let mut app = make_app_with_hunks(2);
+        app.selected_hunk = 1; // select second hunk
+        let text = build_diff_text(&app);
+        // First line of diff content should be the non-selected hunk — starts with "  " not "▶"
+        let first_diff_line = text
+            .lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("@@")))
+            .unwrap();
+        let first_span = &first_diff_line.spans[0];
+        assert_eq!(first_span.content.as_ref(), "  ");
+    }
+
+    #[test]
+    fn test_no_diff_shows_loading() {
+        let files = vec![ChangedFile {
+            path: PathBuf::from("src/main.rs"),
+            status: FileStatus::Modified,
+        }];
+        let app = App::new(files, "main".to_string());
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("Loading"));
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
