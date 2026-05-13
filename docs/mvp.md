@@ -18,10 +18,12 @@ A human sits down, runs `delta main`, reviews what an AI agent changed on the br
 - [ ] Enumerate all changed files (added, modified, deleted, renamed)
 - [ ] File list panel with status indicators
 - [ ] Per-file unified diff view with hunk display
-- [ ] Keyboard navigation: file list, hunk-to-hunk
-- [ ] Attach a text note to a hunk
-- [ ] On exit: export all notes as markdown to stdout or a file
-- [ ] On exit: optionally export as JSON
+- [ ] Keyboard navigation: lazygit-style (arrow keys, tab to switch panels, enter to select)
+- [ ] Status bar showing available keys at all times
+- [ ] Attach a text note to a hunk (inline input, opens below the hunk)
+- [ ] On exit: export all notes as markdown to stdout (pipe to a file with `delta main > review.md`)
+- [ ] `--output <file>` flag to write directly to a file
+- [ ] On exit: `--json` flag to export as JSON instead
 
 ## Out of Scope for MVP
 
