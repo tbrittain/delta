@@ -17,9 +17,13 @@ use ratatui::{
 
 use crate::app::{App, FeedbackNote, Mode, Panel};
 use crate::diff::{ChangedFile, LineKind};
-use crate::git;
+use crate::git::GitBackend;
 
-pub fn run(files: Vec<ChangedFile>, base: &str) -> Result<Vec<FeedbackNote>> {
+pub fn run<G: GitBackend>(
+    files: Vec<ChangedFile>,
+    base: &str,
+    git: &G,
+) -> Result<Vec<FeedbackNote>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -28,9 +32,9 @@ pub fn run(files: Vec<ChangedFile>, base: &str) -> Result<Vec<FeedbackNote>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(files, base.to_string());
-    load_current_file(&mut app);
+    load_current_file(&mut app, git);
 
-    let result = run_event_loop(&mut terminal, &mut app);
+    let result = run_event_loop(&mut terminal, &mut app, git);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -40,20 +44,22 @@ pub fn run(files: Vec<ChangedFile>, base: &str) -> Result<Vec<FeedbackNote>> {
     Ok(app.notes)
 }
 
-fn load_current_file(app: &mut App) {
+fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     if app.files.is_empty() {
         return;
     }
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    app.current_diff = git::file_diff(&app.base, &path)
+    app.current_diff = git
+        .file_diff(&app.base, &path)
         .ok()
         .map(|raw| crate::diff::parse_diff(&raw, file));
 }
 
-fn run_event_loop(
+fn run_event_loop<G: GitBackend>(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    git: &G,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| render(f, app))?;
@@ -86,7 +92,7 @@ fn run_event_loop(
                     },
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
-                            load_current_file(app);
+                            load_current_file(app, git);
                             app.focused_panel = Panel::DiffView;
                         }
                     }
@@ -110,7 +116,7 @@ fn run_event_loop(
 
                 // Auto-load diff when navigating the file list
                 if app.focused_panel == Panel::FileList && app.current_diff.is_none() {
-                    load_current_file(app);
+                    load_current_file(app, git);
                 }
             }
 
@@ -222,7 +228,7 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
-fn build_diff_text(app: &App) -> Text<'static> {
+pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     let Some(ref diff) = app.current_diff else {
@@ -245,7 +251,6 @@ fn build_diff_text(app: &App) -> Text<'static> {
         let is_selected =
             hunk_idx == app.selected_hunk && app.focused_panel == Panel::DiffView;
 
-        // Hunk header
         let header_style = if is_selected {
             Style::default()
                 .fg(Color::Yellow)
@@ -258,7 +263,6 @@ fn build_diff_text(app: &App) -> Text<'static> {
             header_style,
         )));
 
-        // Diff lines
         for diff_line in &hunk.lines {
             let (prefix, style) = match diff_line.kind {
                 LineKind::Added => ("+", Style::default().fg(Color::Green)),
@@ -271,7 +275,6 @@ fn build_diff_text(app: &App) -> Text<'static> {
             ]));
         }
 
-        // Existing notes for this hunk
         for note in &app.notes {
             if note.file == diff.file.path && note.hunk_header == hunk.header {
                 lines.push(Line::from(Span::styled(
@@ -283,7 +286,6 @@ fn build_diff_text(app: &App) -> Text<'static> {
             }
         }
 
-        // Inline comment input for the selected hunk
         if let Mode::Comment {
             hunk_idx: cidx,
             ref input,
@@ -306,9 +308,7 @@ fn build_diff_text(app: &App) -> Text<'static> {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
-        Mode::Comment { .. } => {
-            " Enter: submit  Esc: cancel".to_string()
-        }
+        Mode::Comment { .. } => " Enter: submit  Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
             Panel::FileList => {
                 " Tab: diff view  ↑↓: navigate  Enter: open  q: quit".to_string()

@@ -8,6 +8,8 @@ mod export;
 mod git;
 mod ui;
 
+use git::GitBackend;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "delta",
@@ -28,15 +30,16 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let git = git::SystemGit;
 
-    let files = git::changed_files(&args.base)?;
+    let files = git.changed_files(&args.base)?;
 
     if files.is_empty() {
         eprintln!("No changes found between HEAD and {}", args.base);
         return Ok(());
     }
 
-    let notes = ui::run(files, &args.base)?;
+    let notes = ui::run(files, &args.base, &git)?;
 
     if notes.is_empty() {
         return Ok(());
