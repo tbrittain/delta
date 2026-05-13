@@ -96,14 +96,35 @@ This document tracks implementation status. Check items off as they are complete
 
 ---
 
+## Next Up (in order)
+
+### 1. Bug: `c` on a hunk with an existing note creates a duplicate
+- [ ] Pressing `c` when the current hunk already has a note should redirect to edit mode rather than opening a blank input
+
+### 2. Arbitrary range comparison
+- [ ] Add optional second positional argument: `delta <from> <to>`
+- [ ] When two args provided, diff `<from>..<to>` instead of `<base>..HEAD`
+- [ ] Update CLI help and README
+
+### 3. Multi-line comment input
+- [ ] Replace single-line input with a multi-line text area
+- [ ] Support newlines within the comment body
+- [ ] Preserve existing Enter-to-submit UX via a distinct submit keybind (e.g. `Ctrl+Enter` or `Alt+Enter`)
+
+### 4. Context folding
+- [ ] Collapse consecutive unchanged context lines within a hunk into a `·· N lines ··` placeholder
+- [ ] `Space` (or similar) expands a folded region in place
+- [ ] App state tracks which regions are expanded per hunk
+- [ ] Scroll offset and diff content line calculations updated to account for folded vs expanded state
+- [ ] Hunk-jump scroll positioning updated accordingly
+
+---
+
 ## Post-MVP (not scheduled)
 - [ ] Syntax highlighting in diff view (syntect crate)
-- [ ] Context line folding (collapse unchanged regions)
 - [ ] Renamed file: display old→new path in file list
 - [ ] Mouse support
 - [ ] Performance: background-load remaining file diffs
 - [ ] Performance: virtualized rendering for very large diffs
 - [ ] `similar` crate for inline word-level diff highlighting
 - [ ] Side-by-side diff view
-- [ ] Multi-line comment input
-- [ ] Arbitrary range comparison (`delta <from> <to>`)
