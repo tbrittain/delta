@@ -69,10 +69,17 @@ delta <base-ref>
 **Examples:**
 
 ```bash
-delta main              # review everything on current branch vs main
-delta origin/main       # review vs remote main
-delta HEAD^             # review just the last commit
+delta main              # current branch vs main
+delta origin/main       # current branch vs remote main
+delta HEAD^             # changes in the latest commit only
+delta HEAD~3            # changes across the last 3 commits
+delta abc1234           # current branch vs a specific commit hash
+delta HEAD^2            # current branch vs the second parent of a merge commit
 ```
+
+`<base-ref>` accepts anything git understands as a commit reference.
+
+**Note:** delta compares committed history only. Staged or unstaged working tree changes are not in scope — commit your changes first, then run delta.
 
 **Options:**
 
