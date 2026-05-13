@@ -96,7 +96,7 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Add an optional second argument: `delta <from> <to>` diffs between two arbitrary refs
 - Keep the current single-ref model but document the worktree workaround
 
-**Priority:** Revisit after more testing.
+**Resolved:** Added optional second positional arg — `delta <from> <to>`. When omitted, `<to>` defaults to `HEAD` so existing invocations are unchanged.
 
 ---
 
