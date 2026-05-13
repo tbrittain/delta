@@ -111,11 +111,36 @@ fn run_in_spawned_terminal(args: &Args) -> Result<()> {
     Ok(())
 }
 
-/// Try to spawn a terminal emulator running the given command, then wait for it to exit.
-/// Checks $TERMINAL first, then falls back through a list of common emulators.
+/// Spawn delta in a new visible terminal window and wait for it to exit.
+/// Platform-specific: Windows uses CREATE_NEW_CONSOLE; Unix tries common emulators.
 fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
-    // Each entry: (binary, flags that precede the command)
-    // $TERMINAL is checked first so users can override.
+    #[cfg(target_os = "windows")]
+    return spawn_and_wait_windows(exe, args);
+
+    #[cfg(not(target_os = "windows"))]
+    return spawn_and_wait_unix(exe, args);
+}
+
+/// Windows: spawn with CREATE_NEW_CONSOLE so the OS opens a new visible console window.
+/// The new process inherits the environment (PATH, cwd) from the parent.
+#[cfg(target_os = "windows")]
+fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+    Command::new(exe)
+        .args(args)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .context("Failed to open a new console window. Please run delta directly in a terminal.")?
+        .wait()?;
+
+    Ok(())
+}
+
+/// Unix: try $TERMINAL then common terminal emulators in order, skip any not installed.
+#[cfg(not(target_os = "windows"))]
+fn spawn_and_wait_unix(exe: &PathBuf, args: &[String]) -> Result<()> {
     let mut candidates: Vec<(String, Vec<&str>)> = Vec::new();
 
     if let Ok(term) = std::env::var("TERMINAL") {

@@ -59,6 +59,22 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 
 **Resolved:** `<from>` now defaults to `HEAD~`, so bare `delta` reviews the latest commit. `<to>` continues to default to `HEAD`.
 
+### Windows: diff view shows "No diff content"
+
+**Observed:** On Windows, files appear in the file list but the diff view shows "No diff content." even for files that have changes.
+
+**Suspected causes (not yet diagnosed):**
+- `git diff` output on Windows may use CRLF line endings in ways the parser doesn't handle (though Rust's `str::lines()` should strip them)
+- `git` not on PATH in the spawned console's environment
+- Path separator differences (`\` vs `/`) between what git reports and what delta expects
+- `core.autocrlf = true` causing git to show no textual differences
+
+**To investigate:** Run `git diff HEAD~ HEAD` directly in a Windows terminal and verify it produces output. If it does, the issue is in the parser or the environment delta inherits.
+
+**Priority:** High — blocking on Windows.
+
+---
+
 ### No support for staged/unstaged changes
 
 By design. If this workflow is needed, commit the changes first or use `git stash` to create a commit-like snapshot.
