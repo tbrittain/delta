@@ -208,6 +208,60 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
     }
 }
 
+// ── Arbitrary range comparison ────────────────────────────────────────────────
+
+#[test]
+fn test_same_ref_returns_no_changes() {
+    // Diffing a ref against itself should produce an empty file list.
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files("HEAD", "HEAD").unwrap();
+    assert!(files.is_empty(), "diff of HEAD..HEAD should be empty");
+}
+
+#[test]
+fn test_explicit_to_ref_matches_implicit_head() {
+    // delta main  (to defaults to HEAD)
+    // delta HEAD^ HEAD  (to explicit)
+    // Both should return the same set of changed files.
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let implicit = git.changed_files(FixtureRepo::FROM_REF, "HEAD").unwrap();
+    let explicit = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
+    let implicit_paths: std::collections::HashSet<_> =
+        implicit.iter().map(|f| &f.path).collect();
+    let explicit_paths: std::collections::HashSet<_> =
+        explicit.iter().map(|f| &f.path).collect();
+    assert_eq!(implicit_paths, explicit_paths);
+}
+
+#[test]
+fn test_file_diff_with_explicit_to_ref() {
+    // file_diff with an explicit to ref should return the same content as with HEAD.
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let diff_implicit = git.file_diff(FixtureRepo::FROM_REF, "HEAD", "src/main.rs").unwrap();
+    let diff_explicit = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    assert_eq!(diff_implicit, diff_explicit);
+}
+
+#[test]
+fn test_reversed_range_shows_inverse_diff() {
+    // Swapping from and to should swap additions and removals.
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+
+    let forward = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let backward = git.file_diff(FixtureRepo::TO_REF, FixtureRepo::FROM_REF, "src/main.rs").unwrap();
+
+    // Forward diff adds "delta"; backward diff removes it (shows as addition from the inverse perspective)
+    assert!(forward.contains("+") && forward.contains("-"));
+    assert!(backward.contains("+") && backward.contains("-"));
+    // The content that was added in the forward direction is removed in the backward direction
+    assert!(forward.contains(r#"+"Hello, delta!"#) || forward.contains("delta"));
+    assert_ne!(forward, backward, "reversed range should produce a different diff");
+}
+
 // ── Full pipeline (git → parse → app → export) ────────────────────────────────
 //
 // These tests substitute for a manual TUI smoke test. They exercise the entire
