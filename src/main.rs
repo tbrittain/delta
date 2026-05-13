@@ -1,8 +1,12 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
+
+// bail is only used in the Unix terminal-emulator search path.
+#[cfg(not(target_os = "windows"))]
+use anyhow::bail;
 
 use delta::export;
 use delta::git::{GitBackend, SystemGit};
@@ -132,7 +136,7 @@ fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
         .args(args)
         .creation_flags(CREATE_NEW_CONSOLE)
         .spawn()
-        .context("Failed to open a new console window. Please run delta directly in a terminal.")?
+        .map_err(|e| anyhow::anyhow!("Failed to open a new console window: {e}"))?
         .wait()?;
 
     Ok(())

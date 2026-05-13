@@ -288,10 +288,6 @@ impl App {
     /// input pre-populated with the old text so the user can revise it.
     pub fn edit_note_for_current_hunk(&mut self) {
         let Some((file, header)) = self.current_hunk_identity() else { return };
-        let existing = self.notes
-            .iter()
-            .find(|n| n.file == file && n.hunk_header == header)
-            .map(|n| n.note.clone());
         if let Some(original) = self.notes.iter()
             .find(|n| n.file == file && n.hunk_header == header)
             .cloned()
