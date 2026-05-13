@@ -2,7 +2,7 @@ use std::io;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -138,7 +138,13 @@ fn run_event_loop<G: GitBackend>(
             }
 
             Mode::Comment { mut input, hunk_idx } => match key.code {
-                KeyCode::Enter => app.submit_comment(),
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.submit_comment();
+                }
+                KeyCode::Enter => {
+                    input.push('\n');
+                    app.mode = Mode::Comment { hunk_idx, input };
+                }
                 KeyCode::Esc => app.cancel_comment(),
                 KeyCode::Backspace => {
                     input.pop();
@@ -336,12 +342,16 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
 
         for note in &app.notes {
             if note.file == diff.file.path && note.hunk_header == hunk.header {
-                lines.push(Line::from(Span::styled(
-                    format!("  ◎ {}", note.note),
-                    Style::default()
-                        .fg(Color::Magenta)
-                        .add_modifier(Modifier::ITALIC),
-                )));
+                let note_style = Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::ITALIC);
+                for (i, line_text) in note.note.lines().enumerate() {
+                    let prefix = if i == 0 { "  ◎ " } else { "    " };
+                    lines.push(Line::from(Span::styled(
+                        format!("{}{}", prefix, line_text),
+                        note_style,
+                    )));
+                }
             }
         }
 
@@ -351,11 +361,20 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
         } = app.mode
         {
             if cidx == hunk_idx {
-                lines.push(Line::from(vec![
-                    Span::styled("  ▶ ", Style::default().fg(Color::Yellow)),
-                    Span::raw(input.clone()),
-                    Span::styled("█", Style::default().fg(Color::Yellow)),
-                ]));
+                let input_lines: Vec<&str> = input.split('\n').collect();
+                for (i, line_text) in input_lines.iter().enumerate() {
+                    let is_last = i == input_lines.len() - 1;
+                    let mut spans: Vec<Span<'static>> = if i == 0 {
+                        vec![Span::styled("  ▶ ", Style::default().fg(Color::Yellow))]
+                    } else {
+                        vec![Span::raw("    ")]
+                    };
+                    spans.push(Span::raw(line_text.to_string()));
+                    if is_last {
+                        spans.push(Span::styled("█", Style::default().fg(Color::Yellow)));
+                    }
+                    lines.push(Line::from(spans));
+                }
             }
         }
 
@@ -474,11 +493,58 @@ mod tests {
         let content = text_to_string(&text);
         assert!(content.contains("Loading"));
     }
+
+    // ── Multi-line comment rendering ──────────────────────────────────────────
+
+    #[test]
+    fn test_multiline_comment_renders_multiple_lines() {
+        let mut app = make_app_with_hunks(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "line one\nline two\nline three".to_string(),
+        };
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("line one"));
+        assert!(content.contains("line two"));
+        assert!(content.contains("line three"));
+    }
+
+    #[test]
+    fn test_multiline_comment_cursor_on_last_line_only() {
+        let mut app = make_app_with_hunks(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "line one\nline two".to_string(),
+        };
+        let text = build_diff_text(&app);
+        // Cursor █ should appear exactly once, on the last visual line
+        let content = text_to_string(&text);
+        assert_eq!(content.matches("█").count(), 1);
+        let cursor_pos = content.find("█").unwrap();
+        let line_two_pos = content.find("line two").unwrap();
+        assert!(cursor_pos > line_two_pos, "cursor should be after 'line two'");
+    }
+
+    #[test]
+    fn test_multiline_comment_first_line_has_marker() {
+        let mut app = make_app_with_hunks(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "first\nsecond".to_string(),
+        };
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        // ▶ marker should precede the first line of the comment
+        let marker_pos = content.find("▶").unwrap();
+        let first_pos = content.find("first").unwrap();
+        assert!(marker_pos < first_pos);
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
-        Mode::Comment { .. } => " Enter: submit  Esc: cancel".to_string(),
+        Mode::Comment { .. } => " Ctrl+Enter: submit  Enter: newline  Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
             Panel::FileList => {
                 " Tab: diff view  ↑↓: navigate  Enter: open  q: quit".to_string()

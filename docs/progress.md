@@ -107,9 +107,9 @@ This document tracks implementation status. Check items off as they are complete
 - [x] Update CLI help and README
 
 ### 3. Multi-line comment input
-- [ ] Replace single-line input with a multi-line text area
-- [ ] Support newlines within the comment body
-- [ ] Preserve existing Enter-to-submit UX via a distinct submit keybind (e.g. `Ctrl+Enter` or `Alt+Enter`)
+- [x] Replace single-line input with a multi-line text area
+- [x] Support newlines within the comment body
+- [x] `Enter` inserts newline; `Ctrl+Enter` submits
 
 ### 4. Context folding
 - [ ] Collapse consecutive unchanged context lines within a hunk into a `·· N lines ··` placeholder

@@ -18,7 +18,15 @@ pub fn to_markdown(notes: &[FeedbackNote]) -> String {
         out.push_str("```diff\n");
         out.push_str(&note.hunk_content);
         out.push_str("\n```\n\n");
-        out.push_str(&format!("> **Human:** {}\n\n", note.note));
+        // Multi-line notes: each line needs a > prefix to stay inside the blockquote.
+        let mut note_lines = note.note.lines();
+        if let Some(first) = note_lines.next() {
+            out.push_str(&format!("> **Human:** {}\n", first));
+        }
+        for line in note_lines {
+            out.push_str(&format!("> {}\n", line));
+        }
+        out.push('\n');
         out.push_str("---\n\n");
     }
 
@@ -202,5 +210,39 @@ mod tests {
         let json = to_json(&[]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["notes"].as_array().unwrap().len(), 0);
+    }
+
+    // ── Multi-line note formatting ─────────────────────────────────────────────
+
+    #[test]
+    fn test_markdown_multiline_note_first_line_has_human_label() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "line one\nline two")];
+        let md = to_markdown(&notes);
+        assert!(md.contains("> **Human:** line one"));
+    }
+
+    #[test]
+    fn test_markdown_multiline_note_continuation_has_blockquote_prefix() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "line one\nline two\nline three")];
+        let md = to_markdown(&notes);
+        assert!(md.contains("> line two"));
+        assert!(md.contains("> line three"));
+    }
+
+    #[test]
+    fn test_markdown_multiline_note_no_bare_human_label_on_continuation() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "line one\nline two")];
+        let md = to_markdown(&notes);
+        // Only the first line should have **Human:**
+        let human_count = md.matches("**Human:**").count();
+        assert_eq!(human_count, 1);
+    }
+
+    #[test]
+    fn test_json_multiline_note_preserved() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "line one\nline two")];
+        let json = to_json(&notes).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["notes"][0]["note"].as_str().unwrap().contains('\n'));
     }
 }

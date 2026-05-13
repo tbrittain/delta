@@ -687,4 +687,39 @@ mod tests {
         assert_eq!(app.notes.len(), 1);
         assert_eq!(app.notes[0].note, "revised note");
     }
+
+    // ── Multi-line comment input ──────────────────────────────────────────────
+
+    #[test]
+    fn test_submit_comment_preserves_internal_newlines() {
+        let mut app = app_with_diff(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "line one\nline two\nline three".to_string(),
+        };
+        app.submit_comment();
+        assert_eq!(app.notes[0].note, "line one\nline two\nline three");
+    }
+
+    #[test]
+    fn test_submit_comment_trims_surrounding_newlines() {
+        let mut app = app_with_diff(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "\n\nline one\nline two\n\n".to_string(),
+        };
+        app.submit_comment();
+        assert_eq!(app.notes[0].note, "line one\nline two");
+    }
+
+    #[test]
+    fn test_submit_comment_blank_multiline_is_ignored() {
+        let mut app = app_with_diff(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "\n\n\n".to_string(),
+        };
+        app.submit_comment();
+        assert!(app.notes.is_empty(), "all-whitespace multi-line input should not create a note");
+    }
 }
