@@ -157,42 +157,32 @@ fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
     return spawn_and_wait_unix(exe, args);
 }
 
-/// Windows: use `cmd.exe /c start /wait` to open a new console window.
+/// Windows: use CREATE_NEW_CONSOLE to open delta in a new visible console window.
 ///
-/// CREATE_NEW_CONSOLE was tried first but doesn't work: it creates the window
-/// but the child inherits the parent's stdin (a pipe), so is_terminal() still
-/// returns false and the child tries to spawn yet another window — infinite
-/// recursion. cmd.exe's `start` command creates a fresh process with its own
-/// console stdin not connected to the parent's pipe chain, so is_terminal()
-/// returns true in the inner delta. We also run cmd.exe itself with
-/// CREATE_NO_WINDOW so only the delta window is visible, not a cmd window.
+/// We pass --spawned so the child always runs the TUI regardless of its own
+/// is_terminal() result — this breaks the recursive-spawn loop that made
+/// CREATE_NEW_CONSOLE unusable before --spawned existed.
+///
+/// We avoid cmd.exe /c start entirely: Rust's Command escapes args with \"
+/// but cmd.exe only understands "" quoting, so the two conventions conflict
+/// and mangle the command line. CreateProcess with CREATE_NEW_CONSOLE is the
+/// correct Win32 primitive and requires no shell intermediary.
 #[cfg(target_os = "windows")]
 fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    use std::process::Stdio;
 
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+    // current_exe() can return a \\?\ (extended-length) prefixed path on Windows.
+    // Strip it so CreateProcess resolves the executable through the normal path.
     let exe_str = exe.to_string_lossy();
+    let exe_clean = exe_str.strip_prefix(r"\\?\").unwrap_or(&exe_str);
 
-    // Quote a token for cmd.exe: wrap in double quotes, escape internal quotes.
-    let quote = |s: &str| -> String {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    };
-
-    // Empty title ("") is required — a non-empty title causes cmd.exe to
-    // treat it as the program name rather than the window title.
-    let mut cmd_str = format!("start \"\" /wait {}", quote(&exe_str));
-    for arg in args {
-        cmd_str.push(' ');
-        if arg.contains(' ') || arg.contains('"') || arg.is_empty() {
-            cmd_str.push_str(&quote(arg));
-        } else {
-            cmd_str.push_str(arg);
-        }
-    }
-
-    Command::new("cmd.exe")
-        .args(["/c", &cmd_str])
-        .creation_flags(CREATE_NO_WINDOW)
+    Command::new(exe_clean)
+        .args(args)
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NEW_CONSOLE)
         .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to open console window: {e}"))?
         .wait()?;
