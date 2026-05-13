@@ -38,10 +38,35 @@ struct Args {
     /// terminal window. Skips TTY detection to prevent recursive spawning.
     #[arg(long, hide = true)]
     spawned: bool,
+
+    /// Write a debug log to delta-debug.log in the current directory.
+    /// Use this to diagnose issues such as empty diff output.
+    #[arg(long)]
+    debug: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if args.debug {
+        use simplelog::{Config, LevelFilter, WriteLogger};
+        let log_file = std::fs::File::create("delta-debug.log")
+            .expect("failed to create delta-debug.log");
+        WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)
+            .expect("failed to initialise logger");
+
+        log::debug!("[delta] version={}", env!("CARGO_PKG_VERSION"));
+        log::debug!("[delta] os={} arch={}", std::env::consts::OS, std::env::consts::ARCH);
+        log::debug!(
+            "[delta] cwd={}",
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "<error>".into())
+        );
+        log::debug!("[delta] from={:?} to={:?}", args.from, args.to);
+        log::debug!("[delta] spawned={}", args.spawned);
+        log::debug!("[delta] is_terminal={}", std::io::stdin().is_terminal());
+    }
 
     // --spawned means we were deliberately launched in a new window by a parent
     // delta process — always run the TUI regardless of TTY state.
@@ -102,6 +127,9 @@ fn run_in_spawned_terminal(args: &Args) -> Result<()> {
     ];
     if args.json {
         inner_args.push("--json".to_string());
+    }
+    if args.debug {
+        inner_args.push("--debug".to_string());
     }
 
     spawn_and_wait(&exe, &inner_args)?;

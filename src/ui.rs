@@ -51,10 +51,20 @@ fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     }
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    app.current_diff = git
-        .file_diff(&app.from, &app.to, &path)
-        .ok()
-        .map(|raw| crate::diff::parse_diff(&raw, file));
+    log::debug!("[ui] load_current_file: path={:?}", path);
+    let result = git.file_diff(&app.from, &app.to, &path);
+    log::debug!(
+        "[ui] load_current_file: file_diff result={}",
+        match &result { Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})") }
+    );
+    app.current_diff = result.ok().map(|raw| crate::diff::parse_diff(&raw, file));
+    log::debug!(
+        "[ui] load_current_file: current_diff={}",
+        match &app.current_diff {
+            Some(d) => format!("Some({} hunks)", d.hunks.len()),
+            None => "None".into(),
+        }
+    );
 }
 
 fn run_event_loop<G: GitBackend>(

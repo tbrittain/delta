@@ -33,11 +33,31 @@ impl Default for SystemGit {
 
 impl GitBackend for SystemGit {
     fn changed_files(&self, from: &str, to: &str) -> Result<Vec<ChangedFile>> {
+        log::debug!(
+            "[git] changed_files: from={:?} to={:?} cwd={:?}",
+            from, to, self.repo_dir
+        );
+
         let output = Command::new("git")
             .args(["diff", "--name-status", &format!("{}..{}", from, to)])
             .current_dir(&self.repo_dir)
             .output()
             .context("Failed to run git. Is git installed and are you inside a git repository?")?;
+
+        log::debug!(
+            "[git] changed_files: exit={:?} stdout_bytes={} stderr_bytes={}",
+            output.status.code(), output.stdout.len(), output.stderr.len()
+        );
+        log::debug!(
+            "[git] changed_files: stdout={:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        if !output.stderr.is_empty() {
+            log::debug!(
+                "[git] changed_files: stderr={:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
 
         if !output.status.success() {
             bail!(
@@ -46,17 +66,45 @@ impl GitBackend for SystemGit {
             );
         }
 
-        Ok(parse_name_status(&String::from_utf8(output.stdout)?))
+        let files = parse_name_status(&String::from_utf8(output.stdout)?);
+        log::debug!("[git] changed_files: parsed {} files", files.len());
+        for f in &files {
+            log::debug!("[git]   {:?} -> {}", f.status, f.path.display());
+        }
+        Ok(files)
     }
 
     fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String> {
         // Git always accepts forward slashes; on Windows PathBuf produces backslashes.
         let normalized = path.replace('\\', "/");
+
+        log::debug!(
+            "[git] file_diff: from={:?} to={:?} path={:?} normalized={:?} cwd={:?}",
+            from, to, path, normalized, self.repo_dir
+        );
+
         let output = Command::new("git")
             .args(["diff", &format!("{}..{}", from, to), "--", &normalized])
             .current_dir(&self.repo_dir)
             .output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;
+
+        log::debug!(
+            "[git] file_diff: exit={:?} stdout_bytes={} stderr_bytes={}",
+            output.status.code(), output.stdout.len(), output.stderr.len()
+        );
+        if !output.stderr.is_empty() {
+            log::debug!(
+                "[git] file_diff: stderr={:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        // Log a preview of stdout so we can see if the diff content is arriving.
+        let preview: String = output.stdout.iter()
+            .take(400)
+            .map(|&b| b as char)
+            .collect();
+        log::debug!("[git] file_diff: stdout_preview={:?}", preview);
 
         if !output.status.success() {
             bail!(

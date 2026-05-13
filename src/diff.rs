@@ -55,6 +55,12 @@ pub enum LineKind {
 }
 
 pub fn parse_diff(raw: &str, file: ChangedFile) -> DiffFile {
+    let hunk_markers = raw.lines().filter(|l| l.starts_with("@@")).count();
+    log::debug!(
+        "[parse] parse_diff: path={} raw_bytes={} hunk_markers_found={}",
+        file.path.display(), raw.len(), hunk_markers
+    );
+
     let mut hunks = Vec::new();
     let mut current_hunk: Option<Hunk> = None;
     let mut old_line = 0u32;
@@ -115,6 +121,7 @@ pub fn parse_diff(raw: &str, file: ChangedFile) -> DiffFile {
         hunks.push(hunk);
     }
 
+    log::debug!("[parse] parse_diff: result={} hunks", hunks.len());
     DiffFile { file, hunks }
 }
 
