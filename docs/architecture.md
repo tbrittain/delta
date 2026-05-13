@@ -3,7 +3,7 @@
 ## High-Level Pipeline
 
 ```
-git diff <base>..HEAD
+git diff <from>..<to>
     ↓
 Changed file enumeration
     ↓
@@ -31,31 +31,31 @@ Responsible for:
 
 Key git commands used:
 ```bash
-git diff <base>..HEAD --name-status       # enumerate changed files
-git diff <base>..HEAD -- <file>           # per-file diff content
-git merge-base <base> HEAD                # find fork point
-git rev-parse --abbrev-ref HEAD           # current branch name
+git diff <from>..<to> --name-status       # enumerate changed files
+git diff <from>..<to> -- <file>           # per-file diff content
 ```
+
+`<to>` defaults to `HEAD` when not specified.
 
 Implementation: shell-out initially; libgit2 as a possible future upgrade.
 
 ---
 
-### B. Diff Engine Abstraction
+### B. Git Backend Abstraction
 
-Architecture supports pluggable engines via a trait:
+All git operations are accessed through a trait, allowing tests to inject a fake implementation:
 
 ```rust
-trait DiffEngine {
-    fn diff(&self, file: &ChangedFile, base: &str) -> Result<DiffFile>;
+trait GitBackend {
+    fn changed_files(&self, from: &str, to: &str) -> Result<Vec<ChangedFile>>;
+    fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String>;
 }
 ```
 
-MVP implementation: parse `git diff` unified diff output directly.
+`SystemGit` is the production implementation that shells out to git. The unified diff output is parsed directly into the IR.
 
 Future possibilities:
 - `similar` crate for inline character-level diffing
-- Histogram diff
 - Structural/semantic engines (difftastic, etc.)
 
 ---
@@ -65,14 +65,18 @@ Future possibilities:
 Critical design point: decouple rendering from the diff source.
 
 ```rust
-struct DiffFile {
-    old_path: PathBuf,
-    new_path: PathBuf,
+struct ChangedFile {
+    path: PathBuf,
     status: FileStatus,   // Added, Modified, Deleted, Renamed
+}
+
+struct DiffFile {
+    file: ChangedFile,
     hunks: Vec<Hunk>,
 }
 
 struct Hunk {
+    header: String,       // e.g. "@@ -10,6 +10,8 @@"
     old_start: u32,
     new_start: u32,
     lines: Vec<DiffLine>,
@@ -115,9 +119,9 @@ Feedback is attached to diff hunks or selected line ranges and is intentionally 
 ```rust
 struct FeedbackNote {
     file: PathBuf,
-    hunk_header: String,      // e.g. "@@ -10,6 +10,8 @@"
-    selected_lines: String,   // the specific lines the note is on
-    note: String,             // the human's comment
+    hunk_header: String,   // e.g. "@@ -10,6 +10,8 @@"
+    hunk_content: String,  // the diff lines of the hunk (+/- prefixed)
+    note: String,          // the human's comment (may contain newlines)
 }
 ```
 
@@ -131,15 +135,20 @@ On session close, all feedback notes are serialized to one or both of:
 
 **Markdown** (default, human-readable, paste-friendly):
 ```markdown
-## src/auth.rs
+The following are code review notes from a human reviewer. Please address each item before proceeding.
 
-**Hunk:** `@@ -42,6 +42,9 @@`
-**Code:**
-```rust
-let token = refresh_token.to_string();
-log::debug!("token: {}", token);
+---
+
+## `src/auth.rs` · `@@ -42,6 +42,9 @@`
+
+```diff
+-    log::debug!("token: {}", token);
++    log::debug!("authenticated");
 ```
-**Feedback:** Refresh token is logged in plaintext. Remove this log line and redact sensitive fields.
+
+> **Human:** Refresh token is logged in plaintext. Remove this log line.
+
+---
 ```
 
 **JSON** (for programmatic consumption):
@@ -149,8 +158,8 @@ log::debug!("token: {}", token);
     {
       "file": "src/auth.rs",
       "hunk": "@@ -42,6 +42,9 @@",
-      "lines": "let token = ...\nlog::debug!(...)",
-      "note": "Refresh token is logged in plaintext..."
+      "code": "-    log::debug!(\"token: {}\", token);\n+    log::debug!(\"authenticated\");",
+      "note": "Refresh token is logged in plaintext."
     }
   ]
 }

@@ -22,10 +22,10 @@ Steps 2–4 are friction. delta replaces them with a focused review session that
 ## Workflow
 
 ```
-delta <base-ref>
+delta <from> [<to>]
 ```
 
-Opens a terminal UI showing all files changed between your current branch and the base ref. You navigate the diff, leave notes on specific hunks, and when you quit, delta writes your feedback — anchored to file, hunk, and code context — to stdout (or a file). Feed that output back to the agent.
+Opens a terminal UI showing all files changed between `<from>` and `<to>` (defaults to HEAD). You navigate the diff, leave notes on specific hunks, and when you quit, delta writes your feedback — anchored to file, hunk, and code context — to stdout (or a file). Feed that output back to the agent.
 
 ---
 
@@ -140,6 +140,7 @@ export TERMINAL=gnome-terminal   # or xterm, kitty, alacritty, etc.
 | `c` | Add comment to current hunk |
 | `e` | Edit existing comment on current hunk |
 | `d` | Delete existing comment on current hunk |
+| `Space` | Expand / fold context lines in current hunk |
 | `Tab` | Switch to file list |
 | `q` | Quit and export feedback |
 

@@ -51,11 +51,12 @@ Steps 3–6 are the target. They require context-switching out of the terminal, 
 ## Invocation
 
 ```bash
-delta main          # review current branch vs main
-delta origin/main   # review vs remote main
+delta main              # current branch vs main (to defaults to HEAD)
+delta origin/main       # current branch vs remote main
+delta abc1234 def5678   # diff between two arbitrary commits
 ```
 
-delta is a standalone command that shells out to git. The agent's commit/staging workflow is entirely outside delta's scope — delta only ever sees already-committed changes (branch vs base ref).
+delta is a standalone command that shells out to git. The agent's commit/staging workflow is entirely outside delta's scope — delta only ever sees already-committed changes.
 
 ---
 

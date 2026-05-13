@@ -56,16 +56,14 @@ This document tracks implementation status. Check items off as they are complete
 ---
 
 ## TUI — Comment Flow
-- [x] `c` enters comment mode on current hunk
-- [x] Inline comment input renders below hunk with cursor indicator
-- [x] Character input appends to comment; Backspace removes last char
-- [x] Enter submits comment; Esc cancels
-- [x] Submitted notes display inline in diff (◎ marker)
+- [x] `c` enters comment mode on current hunk (redirects to edit if note already exists)
+- [x] Multi-line comment input: `Enter` inserts newline, `Ctrl+D` submits, `Esc` cancels
+- [x] Inline comment input renders below hunk with cursor indicator (multi-line aware)
+- [x] Submitted notes display inline in diff (◎ marker, multi-line aware)
 - [x] Note dot marker (●) in file list for files with notes
 - [x] `e` edits existing comment (re-opens input pre-populated with old text)
 - [x] `d` deletes existing comment on current hunk
 - [x] Status bar shows `e: edit  d: delete` contextually when hunk has a note
-- [ ] Multi-line comment input (currently single-line only; post-MVP)
 
 ---
 
@@ -80,19 +78,20 @@ This document tracks implementation status. Check items off as they are complete
 ---
 
 ## Tests
-- [x] `diff.rs`: 13 unit tests (hunk header parsing, diff parsing, line kinds, line numbers)
-- [x] `app.rs`: 41 unit tests (file navigation, hunk navigation, scroll, hunk offset, comment flow, edit/delete notes)
-- [x] `export.rs`: 15 unit tests (markdown format, JSON format, preamble, blockquote, diff fence)
+- [x] `diff.rs`: 14 unit tests (hunk header parsing, diff parsing, line kinds, line numbers)
+- [x] `app.rs`: 53 unit tests (file navigation, hunk navigation, scroll, hunk offset, comment flow, multi-line, edit/delete, context folding)
+- [x] `export.rs`: 20 unit tests (markdown format, JSON format, preamble, blockquote, diff fence, multi-line notes)
 - [x] `git.rs`: 8 unit tests (name-status parsing, rename path extraction)
-- [x] `ui.rs`: 5 unit tests (hunk marker presence, position, indent, loading state)
-- [x] Integration tests: 19 tests — fixture git repo (M, A, D, R), git layer, parse pipeline, full app→export flow
+- [x] `ui.rs`: 12 unit tests (hunk marker, indent, loading, multi-line rendering, fold/expand rendering)
+- [x] Integration tests: 23 tests — fixture git repo (M, A, D, R), git layer, parse pipeline, arbitrary range, full app→export flow
 
 ---
 
-## End-to-End Pipeline Tests
+## End-to-End
 - [x] Integration tests exercise the full git → parse pipeline against a fixture repo
 - [x] Full pipeline tests (git → parse → App state → export) without requiring a terminal
-- [x] Manual smoke test attempted: binary runs correctly up to TUI boundary (fails on non-TTY as expected)
+- [x] No-TTY handling: delta spawns a terminal window when stdin is not a TTY (e.g. Claude Code `!` commands); output is piped back to the caller on exit
+- [x] Verified end-to-end: `! delta HEAD^` in Claude Code opens gnome-terminal, review output lands in conversation
 
 ---
 
@@ -109,7 +108,7 @@ This document tracks implementation status. Check items off as they are complete
 ### 3. Multi-line comment input
 - [x] Replace single-line input with a multi-line text area
 - [x] Support newlines within the comment body
-- [x] `Enter` inserts newline; `Ctrl+Enter` submits
+- [x] `Enter` inserts newline; `Ctrl+D` submits (Ctrl+Enter indistinguishable from Enter in most terminals)
 
 ### 4. Context folding
 - [x] Collapse consecutive unchanged context lines within a hunk into a `·· N lines ··` placeholder
@@ -129,3 +128,4 @@ This document tracks implementation status. Check items off as they are complete
 - [ ] Performance: virtualized rendering for very large diffs
 - [ ] `similar` crate for inline word-level diff highlighting
 - [ ] Side-by-side diff view
+- [ ] Virtual hunk splitting for pure-addition large files (no context to fold)
