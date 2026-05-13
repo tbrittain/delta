@@ -57,13 +57,7 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 
 ### No default invocation — `<from>` is required
 
-Running `delta` with no arguments errors. In practice the most common use case is reviewing the last commit (`HEAD^`), so typing the ref every time is friction.
-
-**Possible directions:**
-- Make `<from>` optional, defaulting to `HEAD^` — bare `delta` becomes `delta HEAD^`
-- Alternative default: `HEAD~1` (same commit, clearer semantics)
-
-**Priority:** Small quality-of-life improvement; trivial to implement.
+**Resolved:** `<from>` now defaults to `HEAD~`, so bare `delta` reviews the latest commit. `<to>` continues to default to `HEAD`.
 
 ### No support for staged/unstaged changes
 

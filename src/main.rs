@@ -14,7 +14,8 @@ use delta::ui;
     about = "Terminal diff review tool for AI-assisted development workflows"
 )]
 struct Args {
-    /// Start ref — the older end of the range (e.g. main, HEAD^, abc1234)
+    /// Start ref — the older end of the range (e.g. main, HEAD^, abc1234). Defaults to HEAD~
+    #[arg(default_value = "HEAD~")]
     from: String,
 
     /// End ref — the newer end of the range (defaults to HEAD)

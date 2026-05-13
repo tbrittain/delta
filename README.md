@@ -69,9 +69,10 @@ delta <base-ref>
 **Examples:**
 
 ```bash
-delta main              # current branch vs main (to = HEAD by default)
+delta                   # latest commit (HEAD~ vs HEAD) — the default
+delta main              # current branch vs main
 delta origin/main       # current branch vs remote main
-delta HEAD^             # changes in the latest commit only
+delta HEAD^             # same as bare delta
 delta HEAD~3            # changes across the last 3 commits
 delta abc1234           # current branch vs a specific commit hash
 delta HEAD^2            # current branch vs the second parent of a merge commit
@@ -79,7 +80,7 @@ delta abc1234 def5678   # diff between two arbitrary commits
 delta main feature      # diff between two branch tips
 ```
 
-`<from>` and `<to>` accept anything git understands as a commit reference. `<to>` defaults to `HEAD` when omitted.
+Both `<from>` and `<to>` accept anything git understands as a commit reference. `<from>` defaults to `HEAD~` and `<to>` defaults to `HEAD` when omitted.
 
 **Note:** delta compares committed history only. Staged or unstaged working tree changes are not in scope — commit your changes first, then run delta.
 
