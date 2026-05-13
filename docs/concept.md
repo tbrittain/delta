@@ -45,6 +45,18 @@ Steps 3–6 are the target. They require context-switching out of the terminal, 
 - A persistent code review platform
 - A general-purpose diff engine research project
 - A `git difftool` driver
+- An AI-integrated tool (no built-in LLM calls, no provider integrations)
+- A feature-rich Swiss army knife (no themes, no extras)
+
+---
+
+## Design Philosophy
+
+Delta does **one thing**: a human reviews AI-generated code and produces structured output to feed back to the agent. That is the entire scope.
+
+Every feature must be directly central to the review → structured-output → agent-feedback loop. If a feature doesn't serve that loop, it doesn't belong in delta. Improvements to diff viewing, hunk navigation, comment input, and export format are in scope. Everything else — AI integrations, theme engines, commit tooling, ancillary utilities — is not.
+
+This constraint is intentional. The value of the tool comes from doing its one job exceptionally well, not from accumulating capabilities.
 
 ---
 
