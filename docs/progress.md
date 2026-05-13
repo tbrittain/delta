@@ -74,13 +74,13 @@ This document tracks implementation status. Check items off as they are complete
 - [x] `app.rs`: 30 unit tests (file navigation, hunk navigation, scroll capping, hunk offset, comment flow, state transitions)
 - [x] `export.rs`: 11 unit tests (markdown format, JSON format, empty cases)
 - [x] `git.rs`: 7 unit tests (name-status parsing, edge cases)
-- [ ] Integration tests (approach TBD — likely a fixture git repo)
+- [x] Integration tests: fixture git repo in `tests/common/mod.rs` with 2-commit history (M, A, D, M); 14 tests covering git layer and parse pipeline
 
 ---
 
 ## End-to-End Smoke Test
-- [ ] Run `delta main` in a real repo with staged changes and verify full flow works
-- [ ] Verify exported markdown is well-formed and contains correct file/line context
+- [x] Integration tests exercise the full git → parse pipeline against a fixture repo
+- [ ] Manual smoke test: run `delta HEAD^` in this repo and verify TUI + export work
 
 ---
 

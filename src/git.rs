@@ -8,12 +8,34 @@ pub trait GitBackend {
     fn file_diff(&self, base: &str, path: &str) -> Result<String>;
 }
 
-pub struct SystemGit;
+pub struct SystemGit {
+    repo_dir: std::path::PathBuf,
+}
+
+impl SystemGit {
+    /// Use the current working directory as the repository root.
+    pub fn new() -> Self {
+        Self { repo_dir: std::path::PathBuf::from(".") }
+    }
+
+    /// Use a specific directory as the repository root.
+    /// Primarily used in tests to point at a fixture repository.
+    pub fn with_dir(dir: impl Into<std::path::PathBuf>) -> Self {
+        Self { repo_dir: dir.into() }
+    }
+}
+
+impl Default for SystemGit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GitBackend for SystemGit {
     fn changed_files(&self, base: &str) -> Result<Vec<ChangedFile>> {
         let output = Command::new("git")
             .args(["diff", "--name-status", &format!("{}..HEAD", base)])
+            .current_dir(&self.repo_dir)
             .output()
             .context("Failed to run git. Is git installed and are you inside a git repository?")?;
 
@@ -30,6 +52,7 @@ impl GitBackend for SystemGit {
     fn file_diff(&self, base: &str, path: &str) -> Result<String> {
         let output = Command::new("git")
             .args(["diff", &format!("{}..HEAD", base), "--", path])
+            .current_dir(&self.repo_dir)
             .output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;
 

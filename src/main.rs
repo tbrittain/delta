@@ -2,13 +2,9 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-mod app;
-mod diff;
-mod export;
-mod git;
-mod ui;
-
-use git::GitBackend;
+use delta::export;
+use delta::git::{GitBackend, SystemGit};
+use delta::ui;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -30,7 +26,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let git = git::SystemGit;
+    let git = SystemGit::new();
 
     let files = git.changed_files(&args.base)?;
 
