@@ -123,6 +123,10 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('c') => {
                         if app.focused_panel == Panel::DiffView {
                             app.start_comment();
+                            let viewport = terminal.size()
+                                .map(|r| r.height.saturating_sub(3) as usize)
+                                .unwrap_or(20);
+                            app.scroll_to_show_comment_input(viewport);
                         }
                     }
                     KeyCode::Char(' ') => match app.focused_panel {
@@ -131,7 +135,13 @@ fn run_event_loop<G: GitBackend>(
                         _ => {}
                     },
                     KeyCode::Char('e') => match app.focused_panel {
-                        Panel::DiffView => app.edit_note_for_current_hunk(),
+                        Panel::DiffView => {
+                            app.edit_note_for_current_hunk();
+                            let viewport = terminal.size()
+                                .map(|r| r.height.saturating_sub(3) as usize)
+                                .unwrap_or(20);
+                            app.scroll_to_show_comment_input(viewport);
+                        }
                         Panel::NotesView => {
                             jump_to_note(app, git);
                             app.edit_note_for_current_hunk();

@@ -31,17 +31,22 @@ Opens a terminal UI showing all files changed between `<from>` and `<to>` (defau
 
 ## Installation
 
-### Option 1 — Install script (Linux and macOS)
+### Option 1 — Install script
 
+**Linux and macOS** (bash):
 ```bash
 curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash
 ```
-
-Installs the latest release binary to `~/.local/bin`. To install elsewhere:
-
+Installs to `~/.local/bin`. To install elsewhere:
 ```bash
 curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash -s -- --install-dir /usr/local/bin
 ```
+
+**Windows** (PowerShell 5.1+):
+```powershell
+iwr -useb https://raw.githubusercontent.com/tbrittain/delta/main/install.ps1 | iex
+```
+Installs to `%LOCALAPPDATA%\Programs\delta\` and adds it to your user PATH.
 
 ### Option 2 — Download a release binary
 

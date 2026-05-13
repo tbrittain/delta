@@ -68,25 +68,30 @@ The install script and release artifacts require the repository to be **public**
 
 ---
 
-## Install script
+## Install scripts
 
-`install.sh` at the repo root supports Linux and macOS. It:
-1. Detects OS and architecture
-2. Fetches the latest release tag from the GitHub API
-3. Downloads and extracts the correct binary
-4. Installs to `~/.local/bin` (configurable via `--install-dir`)
-5. Handles replacing an existing install
+### Linux and macOS — `install.sh`
 
-**Usage:**
+Detects OS and architecture, fetches the latest release, installs to `~/.local/bin` (configurable), and adds it to PATH if needed.
+
 ```bash
-# Install latest release
 curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash
-
-# Install to a custom directory
 curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash -s -- --install-dir /usr/local/bin
-
-# Run locally
-bash install.sh [--install-dir DIR]
 ```
 
-Windows users should download the `.zip` from the Releases page and add the binary to their PATH manually.
+Default install locations:
+- Linux: `~/.local/bin/delta` (XDG-compliant)
+- macOS: `~/.local/bin/delta`
+
+### Windows — `install.ps1`
+
+Supports PowerShell 5.1+ (the version shipped with Windows). Installs to `%LOCALAPPDATA%\Programs\delta\delta.exe` and adds the directory to the user PATH.
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/tbrittain/delta/main/install.ps1 | iex
+```
+
+To install to a custom location:
+```powershell
+& ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/tbrittain/delta/main/install.ps1).Content)) -InstallDir "C:\Tools"
+```

@@ -226,6 +226,40 @@ impl App {
         }).sum()
     }
 
+    /// Collect the visual line count and note count for the selected hunk,
+    /// used to calculate where the comment input will appear.
+    fn comment_input_position_data(&self) -> Option<(usize, usize)> {
+        let diff = self.current_diff.as_ref()?;
+        let hunk = diff.hunks.get(self.selected_hunk)?;
+        let is_expanded = self.expanded_hunks.contains(&self.selected_hunk);
+        let content_lines = if is_expanded {
+            hunk.lines.len()
+        } else {
+            context_run_visual_lines(&hunk.lines)
+        };
+        let note_count = self.notes
+            .iter()
+            .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
+            .count();
+        Some((content_lines, note_count))
+    }
+
+    /// After entering comment mode, scroll the diff view down if the comment
+    /// input would appear below the visible viewport.
+    pub fn scroll_to_show_comment_input(&mut self, viewport_height: usize) {
+        let Some((content_lines, note_count)) = self.comment_input_position_data() else {
+            return;
+        };
+        let hunk_start = self.hunk_scroll_offset(self.selected_hunk);
+        // Comment input appears after: header (1) + content + existing notes
+        let comment_row = hunk_start + 1 + content_lines + note_count;
+        // Scroll so comment_row is at least 1 row from the bottom of the viewport
+        let needed = (comment_row + 2).saturating_sub(viewport_height);
+        if self.diff_scroll < needed {
+            self.diff_scroll = needed;
+        }
+    }
+
     /// Returns (file_path, hunk_header) for the currently selected hunk, or None.
     /// Used as a lookup key for notes on the current hunk.
     fn current_hunk_identity(&self) -> Option<(PathBuf, String)> {
@@ -749,6 +783,35 @@ mod tests {
         let mut app = app_with_diff(1);
         // content = 5 lines, viewport = 20 → max_scroll = 0
         app.diff_scroll_down(20);
+        assert_eq!(app.diff_scroll, 0);
+    }
+
+    // ── Comment input viewport scrolling ─────────────────────────────────────
+
+    #[test]
+    fn test_scroll_to_show_comment_input_adjusts_when_below_viewport() {
+        let mut app = app_with_diff(3);
+        // Select hunk 2 (starts at offset 10: two hunks of 5 lines each)
+        app.selected_hunk = 2;
+        // Comment input appears at: hunk_start(2)=10, +1 header +3 lines +0 notes = row 14
+        // With a viewport of 10, we need scroll >= 14+2-10 = 6
+        app.scroll_to_show_comment_input(10);
+        assert!(app.diff_scroll >= 6, "scroll should bring comment input into view");
+    }
+
+    #[test]
+    fn test_scroll_to_show_comment_input_no_op_when_already_visible() {
+        let mut app = app_with_diff(1);
+        // Hunk 0: comment appears at row 4 (1 header + 3 lines)
+        // With viewport of 20, it's already visible — scroll should stay 0
+        app.scroll_to_show_comment_input(20);
+        assert_eq!(app.diff_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_to_show_comment_input_no_op_without_diff() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.scroll_to_show_comment_input(20); // should not panic
         assert_eq!(app.diff_scroll, 0);
     }
 

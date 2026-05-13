@@ -68,7 +68,7 @@ Left/Right arrows move one character at a time. There is no word-jump (`Ctrl+←
 - When `start_comment` is called, scroll the diff view down enough to show the comment input area (estimate based on hunk position + line count)
 - Alternatively, reserve a fixed number of rows at the bottom of the diff panel when in comment mode
 
-**Priority:** Should fix — makes commenting on hunks near the bottom of the screen very confusing.
+**Resolved:** When `c` or `e` is pressed, `scroll_to_show_comment_input` adjusts `diff_scroll` so the comment input is visible before the first render.
 
 ---
 
