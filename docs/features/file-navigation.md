@@ -52,4 +52,14 @@ The panel only appears in the Tab cycle when at least one note exists.
 
 ## Known issues / open feedback
 
-No significant feedback collected yet.
+### No mouse support
+
+All navigation is keyboard-only. Mouse clicks, scroll wheel, and text selection are not supported.
+
+**Possible directions:**
+- Click to select a file in the file list
+- Click a note in the Notes panel to jump to it
+- Scroll wheel for the diff view
+- Click-to-position cursor in comment input
+
+**Priority:** Post-MVP. Would improve accessibility and feel more natural for users less comfortable with keyboard-only TUIs.
