@@ -39,7 +39,7 @@ impl GitBackend for SystemGit {
         );
 
         let output = Command::new("git")
-            .args(["diff", "--name-status", &format!("{}..{}", from, to)])
+            .args(["diff", "--no-ext-diff", "--name-status", &format!("{}..{}", from, to)])
             .current_dir(&self.repo_dir)
             .output()
             .context("Failed to run git. Is git installed and are you inside a git repository?")?;
@@ -84,7 +84,7 @@ impl GitBackend for SystemGit {
         );
 
         let output = Command::new("git")
-            .args(["diff", &format!("{}..{}", from, to), "--", &normalized])
+            .args(["diff", "--no-ext-diff", &format!("{}..{}", from, to), "--", &normalized])
             .current_dir(&self.repo_dir)
             .output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;
