@@ -99,7 +99,7 @@ This document tracks implementation status. Check items off as they are complete
 ## Next Up (in order)
 
 ### 1. Bug: `c` on a hunk with an existing note creates a duplicate
-- [ ] Pressing `c` when the current hunk already has a note should redirect to edit mode rather than opening a blank input
+- [x] Pressing `c` when the current hunk already has a note should redirect to edit mode rather than opening a blank input
 
 ### 2. Arbitrary range comparison
 - [ ] Add optional second positional argument: `delta <from> <to>`

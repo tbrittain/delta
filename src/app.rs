@@ -176,10 +176,14 @@ impl App {
 
     pub fn start_comment(&mut self) {
         if self.current_diff.as_ref().map(|d| !d.hunks.is_empty()).unwrap_or(false) {
-            self.mode = Mode::Comment {
-                hunk_idx: self.selected_hunk,
-                input: String::new(),
-            };
+            if self.current_hunk_has_note() {
+                self.edit_note_for_current_hunk();
+            } else {
+                self.mode = Mode::Comment {
+                    hunk_idx: self.selected_hunk,
+                    input: String::new(),
+                };
+            }
         }
     }
 
@@ -383,6 +387,28 @@ mod tests {
         });
         app.start_comment();
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_start_comment_redirects_to_edit_when_note_exists() {
+        let mut app = app_with_note_on_hunk(0);
+        app.start_comment();
+        // Should enter comment mode pre-populated with the existing note, not a blank input
+        assert!(matches!(
+            &app.mode,
+            Mode::Comment { input, .. } if input == "original note"
+        ));
+    }
+
+    #[test]
+    fn test_start_comment_does_not_create_duplicate() {
+        let mut app = app_with_note_on_hunk(0);
+        app.start_comment(); // redirects to edit — old note removed
+        if let Mode::Comment { ref mut input, .. } = app.mode {
+            *input = "original note".to_string(); // re-submit same text
+        }
+        app.submit_comment();
+        assert_eq!(app.notes.len(), 1, "should have exactly one note, not two");
     }
 
     #[test]
