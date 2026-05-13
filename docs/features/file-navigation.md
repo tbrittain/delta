@@ -33,6 +33,23 @@ When you move the selection, the diff for the newly selected file is loaded auto
 
 ---
 
+## Notes panel
+
+Pressing `Tab` from the diff view opens the Notes panel when there are notes. It replaces the diff view in the right panel and shows all notes left during the session.
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Navigate between notes |
+| `Enter` | Jump directly to the note's file and hunk in the diff view |
+| `Space` | Expand / collapse the full note text |
+| `e` | Jump to the note's hunk and enter edit mode |
+| `d` | Delete the selected note |
+| `Tab` | Return to the diff view |
+
+The panel only appears in the Tab cycle when at least one note exists.
+
+---
+
 ## Known issues / open feedback
 
 No significant feedback collected yet.

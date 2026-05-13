@@ -146,6 +146,17 @@ export TERMINAL=gnome-terminal   # or xterm, kitty, alacritty, etc.
 
 The panel title shows the current file and hunk position (`filename — 2/5`). The status bar shows `e: edit  d: delete` when the current hunk already has a comment, and `c: comment` otherwise.
 
+### Notes panel (Tab from diff view when notes exist)
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Navigate between notes |
+| `Enter` | Jump to the note's file and hunk in the diff view |
+| `Space` | Expand / collapse the full note text |
+| `e` | Jump to the note's hunk and enter edit mode |
+| `d` | Delete the selected note |
+| `Tab` | Return to the diff view |
+
 ### Comment input
 
 | Key | Action |

@@ -80,12 +80,16 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Tab => {
                         app.focused_panel = match app.focused_panel {
                             Panel::FileList => Panel::DiffView,
-                            Panel::DiffView => Panel::FileList,
+                            Panel::DiffView => {
+                                if !app.notes.is_empty() { Panel::NotesView } else { Panel::FileList }
+                            }
+                            Panel::NotesView => Panel::FileList,
                         };
                     }
                     KeyCode::Up => match app.focused_panel {
                         Panel::FileList => app.file_list_up(),
                         Panel::DiffView => app.diff_scroll_up(),
+                        Panel::NotesView => app.notes_up(),
                     },
                     KeyCode::Down => match app.focused_panel {
                         Panel::FileList => app.file_list_down(),
@@ -96,11 +100,14 @@ fn run_event_loop<G: GitBackend>(
                                 .unwrap_or(20);
                             app.diff_scroll_down(viewport);
                         }
+                        Panel::NotesView => app.notes_down(),
                     },
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
                             load_current_file(app, git);
                             app.focused_panel = Panel::DiffView;
+                        } else if app.focused_panel == Panel::NotesView {
+                            jump_to_note(app, git);
                         }
                     }
                     KeyCode::Char('[') => {
@@ -118,21 +125,29 @@ fn run_event_loop<G: GitBackend>(
                             app.start_comment();
                         }
                     }
-                    KeyCode::Char(' ') => {
-                        if app.focused_panel == Panel::DiffView {
-                            app.toggle_hunk_fold();
-                        }
-                    }
-                    KeyCode::Char('e') => {
-                        if app.focused_panel == Panel::DiffView {
+                    KeyCode::Char(' ') => match app.focused_panel {
+                        Panel::DiffView => app.toggle_hunk_fold(),
+                        Panel::NotesView => app.toggle_note_expand(),
+                        _ => {}
+                    },
+                    KeyCode::Char('e') => match app.focused_panel {
+                        Panel::DiffView => app.edit_note_for_current_hunk(),
+                        Panel::NotesView => {
+                            jump_to_note(app, git);
                             app.edit_note_for_current_hunk();
                         }
-                    }
-                    KeyCode::Char('d') => {
-                        if app.focused_panel == Panel::DiffView {
-                            app.delete_note_for_current_hunk();
+                        _ => {}
+                    },
+                    KeyCode::Char('d') => match app.focused_panel {
+                        Panel::DiffView => app.delete_note_for_current_hunk(),
+                        Panel::NotesView => {
+                            app.delete_selected_note();
+                            if app.notes.is_empty() {
+                                app.focused_panel = Panel::DiffView;
+                            }
                         }
-                    }
+                        _ => {}
+                    },
                     _ => {}
                 }
 
@@ -197,7 +212,10 @@ fn render(frame: &mut Frame, app: &App) {
         .split(vertical[0]);
 
     render_file_list(frame, app, horizontal[0]);
-    render_diff_view(frame, app, horizontal[1]);
+    match app.focused_panel {
+        Panel::NotesView => render_notes_panel(frame, app, horizontal[1]),
+        _ => render_diff_view(frame, app, horizontal[1]),
+    }
     render_status_bar(frame, app, vertical[1]);
 }
 
@@ -699,12 +717,92 @@ mod tests {
     }
 }
 
+fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
+    let Some(file_idx) = app.selected_note_file_idx() else { return };
+    let target_header = app.notes[app.selected_note].hunk_header.clone();
+    app.select_file(file_idx);
+    load_current_file(app, git);
+    if let Some(hunk_idx) = app
+        .current_diff
+        .as_ref()
+        .and_then(|d| d.hunks.iter().position(|h| h.header == target_header))
+    {
+        app.selected_hunk = hunk_idx;
+        app.scroll_to_selected_hunk();
+    }
+    app.focused_panel = Panel::DiffView;
+}
+
+fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
+    const TRUNCATE_LEN: usize = 55;
+
+    let title = format!(" Notes ({}) ", app.notes.len());
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if app.notes.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No notes yet.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for (i, note) in app.notes.iter().enumerate() {
+            let is_selected = i == app.selected_note;
+            let is_expanded = app.expanded_notes.contains(&i);
+
+            let header_style = if is_selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            let marker = if is_selected { "▶ " } else { "  " };
+            lines.push(Line::from(Span::styled(
+                format!("{}{} · {}", marker, note.file.display(), note.hunk_header),
+                header_style,
+            )));
+
+            let note_style = Style::default().fg(Color::White);
+            if is_expanded {
+                for line_text in note.note.lines() {
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(line_text.to_string(), note_style),
+                    ]));
+                }
+            } else {
+                let first_line = note.note.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > TRUNCATE_LEN {
+                    format!("{}…", &first_line[..TRUNCATE_LEN])
+                } else {
+                    first_line.to_string()
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(truncated, note_style),
+                ]));
+            }
+
+            lines.push(Line::raw(""));
+        }
+    }
+
+    let para = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue))
+            .title(title),
+    );
+    frame.render_widget(para, area);
+}
+
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
         Mode::Comment { .. } => " Ctrl+D: submit  Enter: newline  Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
             Panel::FileList => {
                 " Tab: diff view  ↑↓: navigate  Enter: open  q: quit".to_string()
+            }
+            Panel::NotesView => {
+                " Tab: back  ↑↓: navigate  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string()
             }
             Panel::DiffView => {
                 let note_count = app.notes.len();

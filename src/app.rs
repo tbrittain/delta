@@ -11,6 +11,7 @@ pub enum Panel {
     #[default]
     FileList,
     DiffView,
+    NotesView,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -47,6 +48,10 @@ pub struct App {
     /// Hunk indices whose context runs have been expanded by the user.
     /// All other hunks have long context runs folded by default.
     pub expanded_hunks: HashSet<usize>,
+    /// Which note is selected in the Notes panel.
+    pub selected_note: usize,
+    /// Which notes are expanded to show full text in the Notes panel.
+    pub expanded_notes: HashSet<usize>,
 }
 
 impl App {
@@ -63,6 +68,8 @@ impl App {
             notes: Vec::new(),
             mode: Mode::Normal,
             expanded_hunks: HashSet::new(),
+            selected_note: 0,
+            expanded_notes: HashSet::new(),
         }
     }
 
@@ -73,6 +80,44 @@ impl App {
             self.selected_hunk = 0;
             self.current_diff = None;
             self.expanded_hunks.clear();
+        }
+    }
+
+    // ── Notes panel ──────────────────────────────────────────────────────────
+
+    pub fn notes_up(&mut self) {
+        self.selected_note = self.selected_note.saturating_sub(1);
+    }
+
+    pub fn notes_down(&mut self) {
+        if self.selected_note + 1 < self.notes.len() {
+            self.selected_note += 1;
+        }
+    }
+
+    pub fn toggle_note_expand(&mut self) {
+        if self.expanded_notes.contains(&self.selected_note) {
+            self.expanded_notes.remove(&self.selected_note);
+        } else {
+            self.expanded_notes.insert(self.selected_note);
+        }
+    }
+
+    /// Returns the index into `self.files` for the note currently selected in the Notes panel.
+    pub fn selected_note_file_idx(&self) -> Option<usize> {
+        let note = self.notes.get(self.selected_note)?;
+        self.files.iter().position(|f| f.path == note.file)
+    }
+
+    /// Deletes the note currently selected in the Notes panel.
+    pub fn delete_selected_note(&mut self) {
+        if self.selected_note >= self.notes.len() {
+            return;
+        }
+        self.notes.remove(self.selected_note);
+        self.expanded_notes.clear();
+        if self.selected_note > 0 && self.selected_note >= self.notes.len() {
+            self.selected_note -= 1;
         }
     }
 
@@ -196,6 +241,10 @@ impl App {
     pub fn delete_note_for_current_hunk(&mut self) {
         let Some((file, header)) = self.current_hunk_identity() else { return };
         self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+        self.expanded_notes.clear();
+        if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
+            self.selected_note = self.notes.len() - 1;
+        }
     }
 
     /// Remove the existing note for the current hunk and re-open the comment
@@ -208,6 +257,10 @@ impl App {
             .map(|n| n.note.clone());
         if let Some(text) = existing {
             self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+            self.expanded_notes.clear();
+            if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
+                self.selected_note = self.notes.len() - 1;
+            }
             let cursor = text.len();
             self.mode = Mode::Comment {
                 hunk_idx: self.selected_hunk,
@@ -873,5 +926,105 @@ mod tests {
         app.expanded_hunks.insert(0);
         app.select_file(1);
         assert!(app.expanded_hunks.is_empty());
+    }
+
+    // ── Notes panel ───────────────────────────────────────────────────────────
+
+    fn app_with_two_file_notes() -> App {
+        let mut app = app_with_diff(2);
+        // Note on hunk 0
+        app.mode = Mode::Comment { hunk_idx: 0, input: "first note".to_string(), cursor: 0 };
+        app.submit_comment();
+        // Note on hunk 1
+        app.selected_hunk = 1;
+        app.mode = Mode::Comment { hunk_idx: 1, input: "second note".to_string(), cursor: 0 };
+        app.submit_comment();
+        app.selected_note = 0;
+        app
+    }
+
+    #[test]
+    fn test_notes_down_navigates() {
+        let mut app = app_with_two_file_notes();
+        app.notes_down();
+        assert_eq!(app.selected_note, 1);
+    }
+
+    #[test]
+    fn test_notes_down_clamps_at_end() {
+        let mut app = app_with_two_file_notes();
+        app.selected_note = 1;
+        app.notes_down();
+        assert_eq!(app.selected_note, 1);
+    }
+
+    #[test]
+    fn test_notes_up_navigates() {
+        let mut app = app_with_two_file_notes();
+        app.selected_note = 1;
+        app.notes_up();
+        assert_eq!(app.selected_note, 0);
+    }
+
+    #[test]
+    fn test_notes_up_clamps_at_zero() {
+        let mut app = app_with_two_file_notes();
+        app.notes_up();
+        assert_eq!(app.selected_note, 0);
+    }
+
+    #[test]
+    fn test_toggle_note_expand() {
+        let mut app = app_with_two_file_notes();
+        assert!(!app.expanded_notes.contains(&0));
+        app.toggle_note_expand();
+        assert!(app.expanded_notes.contains(&0));
+        app.toggle_note_expand();
+        assert!(!app.expanded_notes.contains(&0));
+    }
+
+    #[test]
+    fn test_selected_note_file_idx_found() {
+        let app = app_with_two_file_notes();
+        // Both notes are on src/file_0.rs (same file in app_with_diff)
+        assert_eq!(app.selected_note_file_idx(), Some(0));
+    }
+
+    #[test]
+    fn test_selected_note_file_idx_none_when_no_notes() {
+        let app = app_with_diff(1);
+        assert_eq!(app.selected_note_file_idx(), None);
+    }
+
+    #[test]
+    fn test_delete_selected_note_removes_it() {
+        let mut app = app_with_two_file_notes();
+        app.delete_selected_note();
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.notes[0].note, "second note");
+    }
+
+    #[test]
+    fn test_delete_selected_note_adjusts_index_when_at_end() {
+        let mut app = app_with_two_file_notes();
+        app.selected_note = 1;
+        app.delete_selected_note();
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.selected_note, 0);
+    }
+
+    #[test]
+    fn test_delete_selected_note_clears_expanded_notes() {
+        let mut app = app_with_two_file_notes();
+        app.expanded_notes.insert(0);
+        app.delete_selected_note();
+        assert!(app.expanded_notes.is_empty());
+    }
+
+    #[test]
+    fn test_delete_selected_note_noop_when_empty() {
+        let mut app = app_with_diff(1);
+        app.delete_selected_note(); // should not panic
+        assert!(app.notes.is_empty());
     }
 }
