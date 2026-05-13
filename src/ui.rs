@@ -21,7 +21,8 @@ use crate::git::GitBackend;
 
 pub fn run<G: GitBackend>(
     files: Vec<ChangedFile>,
-    base: &str,
+    from: &str,
+    to: &str,
     git: &G,
 ) -> Result<Vec<FeedbackNote>> {
     enable_raw_mode()?;
@@ -31,7 +32,7 @@ pub fn run<G: GitBackend>(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(files, base.to_string());
+    let mut app = App::new(files, from.to_string(), to.to_string());
     load_current_file(&mut app, git);
 
     let result = run_event_loop(&mut terminal, &mut app, git);
@@ -51,7 +52,7 @@ fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     app.current_diff = git
-        .file_diff(&app.base, &path)
+        .file_diff(&app.from, &app.to, &path)
         .ok()
         .map(|raw| crate::diff::parse_diff(&raw, file));
 }
@@ -375,7 +376,7 @@ mod tests {
             path: PathBuf::from("src/main.rs"),
             status: FileStatus::Modified,
         }];
-        let mut app = App::new(files.clone(), "main".to_string());
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = Panel::DiffView;
         app.current_diff = Some(DiffFile {
             file: files[0].clone(),
@@ -468,7 +469,7 @@ mod tests {
             path: PathBuf::from("src/main.rs"),
             status: FileStatus::Modified,
         }];
-        let app = App::new(files, "main".to_string());
+        let app = App::new(files, "main".to_string(), "HEAD".to_string());
         let text = build_diff_text(&app);
         let content = text_to_string(&text);
         assert!(content.contains("Loading"));

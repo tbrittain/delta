@@ -28,7 +28,8 @@ pub struct FeedbackNote {
 }
 
 pub struct App {
-    pub base: String,
+    pub from: String,
+    pub to: String,
     pub files: Vec<ChangedFile>,
     pub selected_file: usize,
     pub focused_panel: Panel,
@@ -40,9 +41,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(files: Vec<ChangedFile>, base: String) -> Self {
+    pub fn new(files: Vec<ChangedFile>, from: String, to: String) -> Self {
         Self {
-            base,
+            from,
+            to,
             files,
             selected_file: 0,
             focused_panel: Panel::FileList,
@@ -271,7 +273,7 @@ mod tests {
 
     fn app_with_diff(hunk_count: usize) -> App {
         let files = make_files(1);
-        let mut app = App::new(files.clone(), "main".to_string());
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.current_diff = Some(DiffFile {
             file: files[0].clone(),
             hunks: (0..hunk_count)
@@ -285,14 +287,14 @@ mod tests {
 
     #[test]
     fn test_file_list_down_navigates() {
-        let mut app = App::new(make_files(3), "main".to_string());
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_down();
         assert_eq!(app.selected_file, 1);
     }
 
     #[test]
     fn test_file_list_down_clamps_at_end() {
-        let mut app = App::new(make_files(3), "main".to_string());
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.selected_file = 2;
         app.file_list_down();
         assert_eq!(app.selected_file, 2);
@@ -300,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_file_list_up_navigates() {
-        let mut app = App::new(make_files(3), "main".to_string());
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.selected_file = 2;
         app.file_list_up();
         assert_eq!(app.selected_file, 1);
@@ -308,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_file_list_up_clamps_at_start() {
-        let mut app = App::new(make_files(3), "main".to_string());
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_up();
         assert_eq!(app.selected_file, 0);
     }
@@ -357,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_next_hunk_no_op_without_diff() {
-        let mut app = App::new(make_files(1), "main".to_string());
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         app.next_hunk(); // should not panic
         assert_eq!(app.selected_hunk, 0);
     }
@@ -373,14 +375,14 @@ mod tests {
 
     #[test]
     fn test_start_comment_no_op_without_diff() {
-        let mut app = App::new(make_files(1), "main".to_string());
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         app.start_comment();
         assert_eq!(app.mode, Mode::Normal);
     }
 
     #[test]
     fn test_start_comment_no_op_with_empty_hunks() {
-        let mut app = App::new(make_files(1), "main".to_string());
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         app.current_diff = Some(DiffFile {
             file: make_files(1).remove(0),
             hunks: vec![],
@@ -555,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_diff_content_lines_no_diff() {
-        let app = App::new(make_files(1), "main".to_string());
+        let app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         assert_eq!(app.diff_content_lines(), 0);
     }
 
@@ -606,7 +608,7 @@ mod tests {
 
     #[test]
     fn test_current_hunk_has_note_false_without_diff() {
-        let app = App::new(make_files(1), "main".to_string());
+        let app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         assert!(!app.current_hunk_has_note());
     }
 
@@ -643,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_delete_note_no_op_without_diff() {
-        let mut app = App::new(make_files(1), "main".to_string());
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         app.delete_note_for_current_hunk(); // should not panic
     }
 

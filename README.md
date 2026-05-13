@@ -69,15 +69,17 @@ delta <base-ref>
 **Examples:**
 
 ```bash
-delta main              # current branch vs main
+delta main              # current branch vs main (to = HEAD by default)
 delta origin/main       # current branch vs remote main
 delta HEAD^             # changes in the latest commit only
 delta HEAD~3            # changes across the last 3 commits
 delta abc1234           # current branch vs a specific commit hash
 delta HEAD^2            # current branch vs the second parent of a merge commit
+delta abc1234 def5678   # diff between two arbitrary commits
+delta main feature      # diff between two branch tips
 ```
 
-`<base-ref>` accepts anything git understands as a commit reference.
+`<from>` and `<to>` accept anything git understands as a commit reference. `<to>` defaults to `HEAD` when omitted.
 
 **Note:** delta compares committed history only. Staged or unstaged working tree changes are not in scope — commit your changes first, then run delta.
 
@@ -94,12 +96,21 @@ delta HEAD^2            # current branch vs the second parent of a merge commit
 delta main --output review.md
 ```
 
-**Pipe into a Claude Code session:**
+**Pipe output directly into a Claude Code conversation:**
+
+In Claude Code, prefix any shell command with `!` to run it inline and have the output land directly in the conversation:
 
 ```bash
-delta main > review.md
-# then paste or attach review.md to your agent
+! delta main
 ```
+
+The review output appears immediately in the chat where Claude can read and act on it. To save to a file instead:
+
+```bash
+! delta main > review.md
+```
+
+Then reference the file in your message: *"Please address the feedback in review.md."*
 
 ---
 

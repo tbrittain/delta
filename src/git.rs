@@ -4,8 +4,8 @@ use std::process::Command;
 use crate::diff::{ChangedFile, FileStatus};
 
 pub trait GitBackend {
-    fn changed_files(&self, base: &str) -> Result<Vec<ChangedFile>>;
-    fn file_diff(&self, base: &str, path: &str) -> Result<String>;
+    fn changed_files(&self, from: &str, to: &str) -> Result<Vec<ChangedFile>>;
+    fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String>;
 }
 
 pub struct SystemGit {
@@ -32,9 +32,9 @@ impl Default for SystemGit {
 }
 
 impl GitBackend for SystemGit {
-    fn changed_files(&self, base: &str) -> Result<Vec<ChangedFile>> {
+    fn changed_files(&self, from: &str, to: &str) -> Result<Vec<ChangedFile>> {
         let output = Command::new("git")
-            .args(["diff", "--name-status", &format!("{}..HEAD", base)])
+            .args(["diff", "--name-status", &format!("{}..{}", from, to)])
             .current_dir(&self.repo_dir)
             .output()
             .context("Failed to run git. Is git installed and are you inside a git repository?")?;
@@ -49,9 +49,9 @@ impl GitBackend for SystemGit {
         Ok(parse_name_status(&String::from_utf8(output.stdout)?))
     }
 
-    fn file_diff(&self, base: &str, path: &str) -> Result<String> {
+    fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String> {
         let output = Command::new("git")
-            .args(["diff", &format!("{}..HEAD", base), "--", path])
+            .args(["diff", &format!("{}..{}", from, to), "--", path])
             .current_dir(&self.repo_dir)
             .output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;

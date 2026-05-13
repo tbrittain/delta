@@ -12,7 +12,7 @@ use delta::git::{GitBackend, SystemGit};
 fn test_changed_files_returns_all_five() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     assert_eq!(files.len(), 5);
 }
 
@@ -20,7 +20,7 @@ fn test_changed_files_returns_all_five() {
 fn test_changed_files_includes_renamed() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     let renamed: Vec<_> = files.iter().filter(|f| f.status == FileStatus::Renamed).collect();
     assert_eq!(renamed.len(), 1);
     // Must show the new path, not the old one
@@ -32,7 +32,7 @@ fn test_changed_files_includes_renamed() {
 fn test_changed_files_includes_modified() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     let has_modified = files.iter().any(|f| f.status == FileStatus::Modified);
     assert!(has_modified, "expected at least one Modified file");
 }
@@ -41,7 +41,7 @@ fn test_changed_files_includes_modified() {
 fn test_changed_files_includes_added() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     let added: Vec<_> = files.iter().filter(|f| f.status == FileStatus::Added).collect();
     assert_eq!(added.len(), 1);
     assert!(added[0].path.ends_with("new.rs"));
@@ -51,7 +51,7 @@ fn test_changed_files_includes_added() {
 fn test_changed_files_includes_deleted() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     let deleted: Vec<_> = files.iter().filter(|f| f.status == FileStatus::Deleted).collect();
     assert_eq!(deleted.len(), 1);
     assert!(deleted[0].path.ends_with("deleted.rs"));
@@ -61,7 +61,7 @@ fn test_changed_files_includes_deleted() {
 fn test_changed_files_paths_are_relative() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     // Paths from git diff --name-status are always repo-relative, never absolute.
     for f in &files {
         assert!(
@@ -76,7 +76,7 @@ fn test_changed_files_paths_are_relative() {
 fn test_file_diff_returns_nonempty_for_modified_file() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     assert!(!raw.is_empty());
 }
 
@@ -84,7 +84,7 @@ fn test_file_diff_returns_nonempty_for_modified_file() {
 fn test_file_diff_contains_hunk_marker() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     assert!(raw.contains("@@"), "expected unified diff hunk marker");
 }
 
@@ -92,7 +92,7 @@ fn test_file_diff_contains_hunk_marker() {
 fn test_file_diff_for_added_file_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/new.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs").unwrap();
     let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
     let diff = parse_diff(&raw, file);
     for hunk in &diff.hunks {
@@ -112,7 +112,7 @@ fn test_file_diff_for_added_file_has_only_additions() {
 fn test_parse_diff_main_rs_has_one_hunk() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
     assert_eq!(diff.hunks.len(), 1);
@@ -122,7 +122,7 @@ fn test_parse_diff_main_rs_has_one_hunk() {
 fn test_parse_diff_main_rs_has_added_and_removed_lines() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -139,7 +139,7 @@ fn test_parse_diff_main_rs_has_added_and_removed_lines() {
 fn test_parse_diff_main_rs_added_line_content() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -161,7 +161,7 @@ fn test_parse_diff_main_rs_added_line_content() {
 fn test_parse_diff_lib_rs_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/lib.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/lib.rs").unwrap();
     let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -176,7 +176,7 @@ fn test_parse_diff_lib_rs_has_only_additions() {
 fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/new.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs").unwrap();
     let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
     let diff = parse_diff(&raw, file);
 
@@ -188,7 +188,7 @@ fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
 fn test_parse_diff_added_lines_have_new_line_numbers() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::BASE_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -218,7 +218,7 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
 fn test_pipeline_enumerates_correct_files() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
 
     assert!(!files.is_empty());
     let paths: Vec<String> = files.iter().map(|f| f.path.to_string_lossy().into()).collect();
@@ -232,14 +232,14 @@ fn test_pipeline_enumerates_correct_files() {
 fn test_pipeline_loads_and_parses_diff_into_app() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
 
-    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+    let mut app = App::new(files, FixtureRepo::FROM_REF.to_string(), FixtureRepo::TO_REF.to_string());
 
     // Load the diff for the first file manually (as the TUI would on startup)
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     assert!(app.current_diff.is_some());
@@ -250,16 +250,16 @@ fn test_pipeline_loads_and_parses_diff_into_app() {
 fn test_pipeline_comment_and_markdown_export() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
 
-    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+    let mut app = App::new(files, FixtureRepo::FROM_REF.to_string(), FixtureRepo::TO_REF.to_string());
 
     // Load diff for src/main.rs
     let main_idx = app.files.iter().position(|f| f.path.ends_with("main.rs")).unwrap();
     app.select_file(main_idx);
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     // Simulate the user pressing 'c' and submitting a comment
@@ -282,15 +282,15 @@ fn test_pipeline_comment_and_markdown_export() {
 fn test_pipeline_comment_and_json_export() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
 
-    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+    let mut app = App::new(files, FixtureRepo::FROM_REF.to_string(), FixtureRepo::TO_REF.to_string());
 
     let main_idx = app.files.iter().position(|f| f.path.ends_with("main.rs")).unwrap();
     app.select_file(main_idx);
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     app.start_comment();

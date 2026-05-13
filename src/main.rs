@@ -12,8 +12,12 @@ use delta::ui;
     about = "Terminal diff review tool for AI-assisted development workflows"
 )]
 struct Args {
-    /// Base ref to diff against (e.g. main, origin/main)
-    base: String,
+    /// Start ref — the older end of the range (e.g. main, HEAD^, abc1234)
+    from: String,
+
+    /// End ref — the newer end of the range (defaults to HEAD)
+    #[arg(default_value = "HEAD")]
+    to: String,
 
     /// Write output to a file instead of stdout
     #[arg(short, long, value_name = "FILE")]
@@ -28,14 +32,14 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let git = SystemGit::new();
 
-    let files = git.changed_files(&args.base)?;
+    let files = git.changed_files(&args.from, &args.to)?;
 
     if files.is_empty() {
-        eprintln!("No changes found between HEAD and {}", args.base);
+        eprintln!("No changes found between {} and {}", args.from, args.to);
         return Ok(());
     }
 
-    let notes = ui::run(files, &args.base, &git)?;
+    let notes = ui::run(files, &args.from, &args.to, &git)?;
 
     if notes.is_empty() {
         return Ok(());

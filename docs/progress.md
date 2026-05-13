@@ -102,9 +102,9 @@ This document tracks implementation status. Check items off as they are complete
 - [x] Pressing `c` when the current hunk already has a note should redirect to edit mode rather than opening a blank input
 
 ### 2. Arbitrary range comparison
-- [ ] Add optional second positional argument: `delta <from> <to>`
-- [ ] When two args provided, diff `<from>..<to>` instead of `<base>..HEAD`
-- [ ] Update CLI help and README
+- [x] Add optional second positional argument: `delta <from> <to>`
+- [x] When two args provided, diff `<from>..<to>` instead of `<base>..HEAD`
+- [x] Update CLI help and README
 
 ### 3. Multi-line comment input
 - [ ] Replace single-line input with a multi-line text area

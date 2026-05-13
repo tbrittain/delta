@@ -57,7 +57,8 @@ pub struct FixtureRepo {
 }
 
 impl FixtureRepo {
-    pub const BASE_REF: &'static str = "HEAD^";
+    pub const FROM_REF: &'static str = "HEAD^";
+    pub const TO_REF: &'static str = "HEAD";
 
     pub fn new() -> Self {
         let dir = tempdir().expect("failed to create temp dir");
