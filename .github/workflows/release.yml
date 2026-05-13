@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: tar.gz
+            linker: aarch64-linux-gnu-gcc
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            ext: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install ARM64 Linux cross-compiler
+        if: matrix.linker != ''
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+
+      - name: Package (Unix)
+        if: matrix.ext == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          NAME="delta-${VERSION}-${{ matrix.target }}"
+          mkdir -p "${NAME}"
+          cp "target/${{ matrix.target }}/release/delta" "${NAME}/"
+          cp README.md "${NAME}/"
+          tar czf "${NAME}.tar.gz" "${NAME}"
+          echo "ASSET=${NAME}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: |
+          $version = "$env:GITHUB_REF_NAME"
+          $name = "delta-${version}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $name
+          Copy-Item "target/${{ matrix.target }}/release/delta.exe" "${name}/"
+          Copy-Item "README.md" "${name}/"
+          Compress-Archive -Path $name -DestinationPath "${name}.zip"
+          "ASSET=${name}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

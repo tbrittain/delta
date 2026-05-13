@@ -29,34 +29,40 @@ Opens a terminal UI showing all files changed between `<from>` and `<to>` (defau
 
 ---
 
-## Prerequisites
+## Installation
 
-- Rust toolchain (`rustup` recommended — [rustup.rs](https://rustup.rs))
-- Git
-
----
-
-## Building
+### Option 1 — Install script (Linux and macOS)
 
 ```bash
-cargo build --release
+curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash
 ```
 
-The binary is at `target/release/delta`.
-
-**To install to your PATH**, run from the repository root:
+Installs the latest release binary to `~/.local/bin`. To install elsewhere:
 
 ```bash
-cargo install --path /path/to/delta
+curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash -s -- --install-dir /usr/local/bin
 ```
 
-For example, if you cloned to `~/source/delta`:
+### Option 2 — Download a release binary
+
+Download the binary for your platform from the [Releases page](https://github.com/tbrittain/delta/releases/latest) and place it on your PATH.
+
+| Platform | File |
+|---|---|
+| Linux x86_64 | `delta-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 | `delta-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Intel | `delta-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `delta-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `delta-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+
+### Option 3 — Build from source
+
+Requires the [Rust toolchain](https://rustup.rs) and Git.
 
 ```bash
-cargo install --path ~/source/delta
+git clone https://github.com/tbrittain/delta.git
+cargo install --path delta
 ```
-
-This installs the `delta` binary to `~/.cargo/bin/`, which is on your PATH if you followed the rustup installation. After that, `delta` works from any directory.
 
 ---
 
