@@ -15,7 +15,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::app::{App, FeedbackNote, Mode, Panel};
+use crate::app::{App, FeedbackNote, Mode, Panel, FOLD_THRESHOLD};
 use crate::diff::{ChangedFile, FileStatus, LineKind};
 use crate::git::GitBackend;
 
@@ -116,6 +116,11 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('c') => {
                         if app.focused_panel == Panel::DiffView {
                             app.start_comment();
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if app.focused_panel == Panel::DiffView {
+                            app.toggle_hunk_fold();
                         }
                     }
                     KeyCode::Char('e') => {
@@ -271,6 +276,58 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
+fn push_diff_line(dl: &crate::diff::DiffLine, out: &mut Vec<Line<'static>>) {
+    let (prefix, style) = match dl.kind {
+        LineKind::Added => ("+", Style::default().fg(Color::Green)),
+        LineKind::Removed => ("-", Style::default().fg(Color::Red)),
+        LineKind::Context => (" ", Style::default().fg(Color::Gray)),
+    };
+    let lineno = match dl.kind {
+        LineKind::Removed => dl.old_lineno,
+        _ => dl.new_lineno,
+    };
+    let lineno_str = match lineno {
+        Some(n) => format!("{:>4}", n),
+        None => "    ".to_string(),
+    };
+    out.push(Line::from(vec![
+        Span::styled(lineno_str, Style::default().fg(Color::DarkGray)),
+        Span::styled(" ", Style::default().fg(Color::DarkGray)),
+        Span::styled(prefix, style),
+        Span::styled(dl.content.clone(), style),
+    ]));
+}
+
+fn push_diff_lines_folded(diff_lines: &[crate::diff::DiffLine], out: &mut Vec<Line<'static>>) {
+    let fold_style = Style::default().fg(Color::DarkGray);
+    let mut ctx_start = 0;
+    let mut i = 0;
+
+    while i <= diff_lines.len() {
+        let is_context = i < diff_lines.len() && diff_lines[i].kind == LineKind::Context;
+
+        if !is_context {
+            let ctx_count = i - ctx_start;
+            if ctx_count >= FOLD_THRESHOLD {
+                out.push(Line::from(Span::styled(
+                    format!("  ·· {} lines of context ··", ctx_count),
+                    fold_style,
+                )));
+            } else {
+                for j in ctx_start..i {
+                    push_diff_line(&diff_lines[j], out);
+                }
+            }
+            if i < diff_lines.len() {
+                push_diff_line(&diff_lines[i], out);
+            }
+            ctx_start = i + 1;
+        }
+
+        i += 1;
+    }
+}
+
 pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
@@ -316,28 +373,12 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
             ]));
         }
 
-        for diff_line in &hunk.lines {
-            let (prefix, style) = match diff_line.kind {
-                LineKind::Added => ("+", Style::default().fg(Color::Green)),
-                LineKind::Removed => ("-", Style::default().fg(Color::Red)),
-                LineKind::Context => (" ", Style::default().fg(Color::Gray)),
-            };
-            // Show the line number most relevant for this line kind:
-            // added/context → new file line number; removed → old file line number.
-            let lineno = match diff_line.kind {
-                LineKind::Removed => diff_line.old_lineno,
-                _ => diff_line.new_lineno,
-            };
-            let lineno_str = match lineno {
-                Some(n) => format!("{:>4}", n),
-                None => "    ".to_string(),
-            };
-            lines.push(Line::from(vec![
-                Span::styled(lineno_str, Style::default().fg(Color::DarkGray)),
-                Span::styled(" ", Style::default().fg(Color::DarkGray)),
-                Span::styled(prefix, style),
-                Span::styled(diff_line.content.clone(), style),
-            ]));
+        if app.expanded_hunks.contains(&hunk_idx) {
+            for diff_line in &hunk.lines {
+                push_diff_line(diff_line, &mut lines);
+            }
+        } else {
+            push_diff_lines_folded(&hunk.lines, &mut lines);
         }
 
         for note in &app.notes {
@@ -540,6 +581,78 @@ mod tests {
         let first_pos = content.find("first").unwrap();
         assert!(marker_pos < first_pos);
     }
+
+    // ── Context folding rendering ─────────────────────────────────────────────
+
+    fn make_app_with_long_context_hunk() -> App {
+        use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+        let files = vec![ChangedFile {
+            path: PathBuf::from("src/main.rs"),
+            status: FileStatus::Modified,
+        }];
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
+        app.focused_panel = Panel::DiffView;
+        // One hunk: 1 added + FOLD_THRESHOLD context lines + 1 removed
+        let mut lines = vec![DiffLine {
+            old_lineno: None, new_lineno: Some(1),
+            kind: LineKind::Added, content: "added".to_string(),
+        }];
+        for i in 0..crate::app::FOLD_THRESHOLD {
+            lines.push(DiffLine {
+                old_lineno: Some(i as u32 + 1), new_lineno: Some(i as u32 + 2),
+                kind: LineKind::Context, content: format!("ctx {}", i),
+            });
+        }
+        lines.push(DiffLine {
+            old_lineno: Some(10), new_lineno: None,
+            kind: LineKind::Removed, content: "removed".to_string(),
+        });
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: vec![Hunk {
+                header: "@@ -1,10 +1,10 @@".to_string(),
+                old_start: 1, new_start: 1, lines,
+            }],
+        });
+        app
+    }
+
+    #[test]
+    fn test_folded_hunk_shows_placeholder() {
+        let app = make_app_with_long_context_hunk();
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("·· "), "folded context should show placeholder");
+        assert!(content.contains("lines of context"));
+    }
+
+    #[test]
+    fn test_folded_hunk_hides_individual_context_lines() {
+        let app = make_app_with_long_context_hunk();
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        // Individual context line content should not appear when folded
+        assert!(!content.contains("ctx 0"), "individual context lines should be hidden when folded");
+    }
+
+    #[test]
+    fn test_expanded_hunk_shows_context_lines() {
+        let mut app = make_app_with_long_context_hunk();
+        app.expanded_hunks.insert(0);
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("ctx 0"), "expanded hunk should show all context lines");
+        assert!(!content.contains("lines of context"), "expanded hunk should not show placeholder");
+    }
+
+    #[test]
+    fn test_folded_hunk_still_shows_added_and_removed() {
+        let app = make_app_with_long_context_hunk();
+        let text = build_diff_text(&app);
+        let content = text_to_string(&text);
+        assert!(content.contains("added"));
+        assert!(content.contains("removed"));
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -563,9 +676,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     "  c: comment"
                 };
+                let fold_hint = if app.selected_hunk_is_foldable() {
+                    if app.expanded_hunks.contains(&app.selected_hunk) {
+                        "  Space: fold"
+                    } else {
+                        "  Space: expand"
+                    }
+                } else {
+                    ""
+                };
                 format!(
-                    " Tab: file list  ↑↓: scroll  []: hunk{}  q: quit{}",
+                    " Tab: file list  ↑↓: scroll  []: hunk{}{}  q: quit{}",
                     note_actions,
+                    fold_hint,
                     notes_str,
                 )
             }

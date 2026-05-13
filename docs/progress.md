@@ -112,11 +112,12 @@ This document tracks implementation status. Check items off as they are complete
 - [x] `Enter` inserts newline; `Ctrl+Enter` submits
 
 ### 4. Context folding
-- [ ] Collapse consecutive unchanged context lines within a hunk into a `·· N lines ··` placeholder
-- [ ] `Space` (or similar) expands a folded region in place
-- [ ] App state tracks which regions are expanded per hunk
-- [ ] Scroll offset and diff content line calculations updated to account for folded vs expanded state
-- [ ] Hunk-jump scroll positioning updated accordingly
+- [x] Collapse consecutive unchanged context lines within a hunk into a `·· N lines ··` placeholder
+- [x] `Space` toggles fold/expand on the selected hunk
+- [x] App state tracks which hunks are expanded (`expanded_hunks: HashSet<usize>`)
+- [x] Scroll offset and diff content line calculations updated to account for folded vs expanded state
+- [x] Hunk-jump scroll positioning updated accordingly
+- [x] Status bar shows `Space: expand` / `Space: fold` contextually when hunk is foldable
 
 ---
 

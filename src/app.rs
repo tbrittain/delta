@@ -1,6 +1,10 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::diff::{ChangedFile, DiffFile, LineKind};
+use crate::diff::{ChangedFile, DiffFile, DiffLine, LineKind};
+
+/// Context runs of this many lines or more are folded by default.
+pub(crate) const FOLD_THRESHOLD: usize = 6;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Panel {
@@ -38,6 +42,9 @@ pub struct App {
     pub selected_hunk: usize,
     pub notes: Vec<FeedbackNote>,
     pub mode: Mode,
+    /// Hunk indices whose context runs have been expanded by the user.
+    /// All other hunks have long context runs folded by default.
+    pub expanded_hunks: HashSet<usize>,
 }
 
 impl App {
@@ -53,6 +60,7 @@ impl App {
             selected_hunk: 0,
             notes: Vec::new(),
             mode: Mode::Normal,
+            expanded_hunks: HashSet::new(),
         }
     }
 
@@ -62,7 +70,23 @@ impl App {
             self.diff_scroll = 0;
             self.selected_hunk = 0;
             self.current_diff = None;
+            self.expanded_hunks.clear();
         }
+    }
+
+    pub fn toggle_hunk_fold(&mut self) {
+        if self.expanded_hunks.contains(&self.selected_hunk) {
+            self.expanded_hunks.remove(&self.selected_hunk);
+        } else {
+            self.expanded_hunks.insert(self.selected_hunk);
+        }
+    }
+
+    /// True if the selected hunk has any context run long enough to fold.
+    pub fn selected_hunk_is_foldable(&self) -> bool {
+        let Some(ref diff) = self.current_diff else { return false };
+        let Some(hunk) = diff.hunks.get(self.selected_hunk) else { return false };
+        hunk_has_foldable_context(&hunk.lines)
     }
 
     pub fn file_list_up(&mut self) {
@@ -110,7 +134,7 @@ impl App {
     }
 
     /// Compute the rendered line offset of `target_hunk` within the diff view.
-    /// Used to scroll the view when jumping between hunks.
+    /// Accounts for folded context runs so hunk-jump scrolls to the right position.
     fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
         let mut offset = 0;
@@ -118,24 +142,37 @@ impl App {
             if i >= target_hunk {
                 break;
             }
+            let is_expanded = self.expanded_hunks.contains(&i);
+            let content_lines = if is_expanded {
+                hunk.lines.len()
+            } else {
+                context_run_visual_lines(&hunk.lines)
+            };
             let note_count = self.notes
                 .iter()
                 .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
                 .count();
-            offset += 1 + hunk.lines.len() + note_count + 1; // header + lines + notes + blank
+            offset += 1 + content_lines + note_count + 1; // header + lines + notes + blank
         }
         offset
     }
 
     /// Total rendered line count for the current diff, used to cap scroll.
+    /// Accounts for folded context runs.
     fn diff_content_lines(&self) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
-        diff.hunks.iter().map(|h| {
+        diff.hunks.iter().enumerate().map(|(i, h)| {
+            let is_expanded = self.expanded_hunks.contains(&i);
+            let content_lines = if is_expanded {
+                h.lines.len()
+            } else {
+                context_run_visual_lines(&h.lines)
+            };
             let note_count = self.notes
                 .iter()
                 .filter(|n| n.file == diff.file.path && n.hunk_header == h.header)
                 .count();
-            1 + h.lines.len() + note_count + 1 // header + lines + notes + blank
+            1 + content_lines + note_count + 1 // header + lines + notes + blank
         }).sum()
     }
 
@@ -225,6 +262,40 @@ impl App {
     pub fn cancel_comment(&mut self) {
         self.mode = Mode::Normal;
     }
+}
+
+/// Count the visual lines a slice of diff lines occupies when context runs are folded.
+/// Runs of context lines >= FOLD_THRESHOLD collapse to a single placeholder line.
+fn context_run_visual_lines(lines: &[DiffLine]) -> usize {
+    let mut count = 0;
+    let mut ctx_run = 0;
+    for line in lines {
+        if line.kind == LineKind::Context {
+            ctx_run += 1;
+        } else {
+            count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
+            ctx_run = 0;
+            count += 1;
+        }
+    }
+    count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
+    count
+}
+
+/// True if the given lines contain at least one context run long enough to fold.
+fn hunk_has_foldable_context(lines: &[DiffLine]) -> bool {
+    let mut ctx_run = 0;
+    for line in lines {
+        if line.kind == LineKind::Context {
+            ctx_run += 1;
+            if ctx_run >= FOLD_THRESHOLD {
+                return true;
+            }
+        } else {
+            ctx_run = 0;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -721,5 +792,72 @@ mod tests {
         };
         app.submit_comment();
         assert!(app.notes.is_empty(), "all-whitespace multi-line input should not create a note");
+    }
+
+    // ── Context folding ───────────────────────────────────────────────────────
+
+    fn make_lines(kinds: &[LineKind]) -> Vec<crate::diff::DiffLine> {
+        kinds.iter().map(|k| crate::diff::DiffLine {
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+            kind: k.clone(),
+            content: "x".to_string(),
+        }).collect()
+    }
+
+    #[test]
+    fn test_context_run_visual_lines_short_run_shown_as_is() {
+        // 3 context lines < FOLD_THRESHOLD — should count as 3, not 1
+        let lines = make_lines(&[LineKind::Context; 3]);
+        assert_eq!(context_run_visual_lines(&lines), 3);
+    }
+
+    #[test]
+    fn test_context_run_visual_lines_long_run_folds_to_one() {
+        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
+        assert_eq!(context_run_visual_lines(&lines), 1);
+    }
+
+    #[test]
+    fn test_context_run_visual_lines_mixed() {
+        // added + 2 context + added + FOLD_THRESHOLD context + added
+        let mut kinds = vec![LineKind::Added];
+        kinds.extend(vec![LineKind::Context; 2]);
+        kinds.push(LineKind::Added);
+        kinds.extend(vec![LineKind::Context; FOLD_THRESHOLD]);
+        kinds.push(LineKind::Added);
+        let lines = make_lines(&kinds);
+        // visual: 1 + 2 + 1 + 1(fold) + 1 = 6
+        assert_eq!(context_run_visual_lines(&lines), 6);
+    }
+
+    #[test]
+    fn test_hunk_has_foldable_context_false_when_below_threshold() {
+        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD - 1]);
+        assert!(!hunk_has_foldable_context(&lines));
+    }
+
+    #[test]
+    fn test_hunk_has_foldable_context_true_at_threshold() {
+        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
+        assert!(hunk_has_foldable_context(&lines));
+    }
+
+    #[test]
+    fn test_toggle_hunk_fold_expands_then_collapses() {
+        let mut app = app_with_diff(2);
+        assert!(!app.expanded_hunks.contains(&0));
+        app.toggle_hunk_fold();
+        assert!(app.expanded_hunks.contains(&0));
+        app.toggle_hunk_fold();
+        assert!(!app.expanded_hunks.contains(&0));
+    }
+
+    #[test]
+    fn test_select_file_clears_expanded_hunks() {
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.expanded_hunks.insert(0);
+        app.select_file(1);
+        assert!(app.expanded_hunks.is_empty());
     }
 }
