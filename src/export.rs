@@ -18,7 +18,7 @@ pub fn to_markdown(notes: &[FeedbackNote]) -> String {
         out.push_str("```diff\n");
         out.push_str(&note.hunk_content);
         out.push_str("\n```\n\n");
-        out.push_str(&format!("**Human:** {}\n\n", note.note));
+        out.push_str(&format!("> **Human:** {}\n\n", note.note));
         out.push_str("---\n\n");
     }
 
@@ -128,8 +128,15 @@ mod tests {
     fn test_markdown_uses_human_label_not_feedback() {
         let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "too verbose")];
         let md = to_markdown(&notes);
-        assert!(md.contains("**Human:**"));
+        assert!(md.contains("> **Human:**"));
         assert!(!md.contains("**Feedback:**"));
+    }
+
+    #[test]
+    fn test_markdown_human_note_is_blockquote() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "too verbose")];
+        let md = to_markdown(&notes);
+        assert!(md.contains("> **Human:** too verbose"));
     }
 
     #[test]
