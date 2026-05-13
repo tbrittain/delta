@@ -51,10 +51,9 @@ Targets built:
 | Target | Platform |
 |---|---|
 | `x86_64-unknown-linux-gnu` | Linux x86_64 |
-| `aarch64-unknown-linux-gnu` | Linux ARM64 |
-| `x86_64-apple-darwin` | macOS Intel |
-| `aarch64-apple-darwin` | macOS Apple Silicon |
 | `x86_64-pc-windows-msvc` | Windows x86_64 |
+
+macOS and Linux ARM64 are not yet officially supported and are excluded from release builds. Add them back to `release.yml` when ready.
 
 ### 4. Verify the release
 

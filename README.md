@@ -55,10 +55,9 @@ Download the binary for your platform from the [Releases page](https://github.co
 | Platform | File |
 |---|---|
 | Linux x86_64 | `delta-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux ARM64 | `delta-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz` |
-| macOS Intel | `delta-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
-| macOS Apple Silicon | `delta-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
 | Windows x86_64 | `delta-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+
+> macOS and Linux ARM64 are not yet officially supported. Builds from source should work but are untested.
 
 ### Option 3 — Build from source
 
