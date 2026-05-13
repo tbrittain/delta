@@ -79,20 +79,62 @@ impl App {
         self.diff_scroll = self.diff_scroll.saturating_sub(3);
     }
 
-    pub fn diff_scroll_down(&mut self) {
-        self.diff_scroll += 3;
+    /// Scroll the diff view down, capped so we never scroll past the content.
+    /// `viewport_height` is the number of visible lines in the diff panel.
+    pub fn diff_scroll_down(&mut self, viewport_height: usize) {
+        let max_scroll = self.diff_content_lines().saturating_sub(viewport_height);
+        self.diff_scroll = (self.diff_scroll + 3).min(max_scroll);
     }
 
     pub fn next_hunk(&mut self) {
         if let Some(ref diff) = self.current_diff {
             if self.selected_hunk + 1 < diff.hunks.len() {
                 self.selected_hunk += 1;
+                self.scroll_to_selected_hunk();
             }
         }
     }
 
     pub fn prev_hunk(&mut self) {
-        self.selected_hunk = self.selected_hunk.saturating_sub(1);
+        if self.selected_hunk > 0 {
+            self.selected_hunk -= 1;
+            self.scroll_to_selected_hunk();
+        }
+    }
+
+    /// Scroll the diff view so the selected hunk is at the top.
+    pub fn scroll_to_selected_hunk(&mut self) {
+        self.diff_scroll = self.hunk_scroll_offset(self.selected_hunk);
+    }
+
+    /// Compute the rendered line offset of `target_hunk` within the diff view.
+    /// Used to scroll the view when jumping between hunks.
+    fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
+        let Some(ref diff) = self.current_diff else { return 0 };
+        let mut offset = 0;
+        for (i, hunk) in diff.hunks.iter().enumerate() {
+            if i >= target_hunk {
+                break;
+            }
+            let note_count = self.notes
+                .iter()
+                .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
+                .count();
+            offset += 1 + hunk.lines.len() + note_count + 1; // header + lines + notes + blank
+        }
+        offset
+    }
+
+    /// Total rendered line count for the current diff, used to cap scroll.
+    fn diff_content_lines(&self) -> usize {
+        let Some(ref diff) = self.current_diff else { return 0 };
+        diff.hunks.iter().map(|h| {
+            let note_count = self.notes
+                .iter()
+                .filter(|n| n.file == diff.file.path && n.hunk_header == h.header)
+                .count();
+            1 + h.lines.len() + note_count + 1 // header + lines + notes + blank
+        }).sum()
     }
 
     pub fn start_comment(&mut self) {
@@ -377,5 +419,99 @@ mod tests {
 
         assert_eq!(app.notes.len(), 1);
         assert!(app.notes[0].hunk_header.contains("11")); // second hunk starts at 11
+    }
+
+    // ── Hunk scroll offset ────────────────────────────────────────────────────
+
+    // Each test hunk has: 1 header + 3 lines (added, removed, context) + 1 blank = 5 lines.
+
+    #[test]
+    fn test_hunk_scroll_offset_first_hunk_is_zero() {
+        let app = app_with_diff(3);
+        assert_eq!(app.hunk_scroll_offset(0), 0);
+    }
+
+    #[test]
+    fn test_hunk_scroll_offset_second_hunk() {
+        let app = app_with_diff(3);
+        // hunk 0: 1 header + 3 lines + 0 notes + 1 blank = 5
+        assert_eq!(app.hunk_scroll_offset(1), 5);
+    }
+
+    #[test]
+    fn test_hunk_scroll_offset_third_hunk() {
+        let app = app_with_diff(3);
+        // hunk 0 + hunk 1 = 5 + 5 = 10
+        assert_eq!(app.hunk_scroll_offset(2), 10);
+    }
+
+    #[test]
+    fn test_hunk_scroll_offset_accounts_for_notes() {
+        let mut app = app_with_diff(2);
+        // Add a note on hunk 0
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string() };
+        app.submit_comment();
+        // hunk 0: 1 header + 3 lines + 1 note + 1 blank = 6
+        assert_eq!(app.hunk_scroll_offset(1), 6);
+    }
+
+    #[test]
+    fn test_scroll_to_selected_hunk_sets_diff_scroll() {
+        let mut app = app_with_diff(3);
+        app.selected_hunk = 2;
+        app.scroll_to_selected_hunk();
+        assert_eq!(app.diff_scroll, 10);
+    }
+
+    #[test]
+    fn test_next_hunk_scrolls_view() {
+        let mut app = app_with_diff(3);
+        app.next_hunk();
+        assert_eq!(app.selected_hunk, 1);
+        assert_eq!(app.diff_scroll, 5); // scrolled to hunk 1
+    }
+
+    #[test]
+    fn test_prev_hunk_scrolls_view() {
+        let mut app = app_with_diff(3);
+        app.selected_hunk = 2;
+        app.diff_scroll = 10;
+        app.prev_hunk();
+        assert_eq!(app.selected_hunk, 1);
+        assert_eq!(app.diff_scroll, 5);
+    }
+
+    // ── Diff scroll capping ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_diff_content_lines() {
+        let app = app_with_diff(3);
+        // 3 hunks * (1 header + 3 lines + 0 notes + 1 blank) = 3 * 5 = 15
+        assert_eq!(app.diff_content_lines(), 15);
+    }
+
+    #[test]
+    fn test_diff_content_lines_no_diff() {
+        let app = App::new(make_files(1), "main".to_string());
+        assert_eq!(app.diff_content_lines(), 0);
+    }
+
+    #[test]
+    fn test_diff_scroll_down_caps_at_content_boundary() {
+        let mut app = app_with_diff(1);
+        // 1 hunk: 1 + 3 + 1 = 5 lines of content
+        // viewport of 3 → max_scroll = 5 - 3 = 2
+        app.diff_scroll_down(3);
+        app.diff_scroll_down(3);
+        app.diff_scroll_down(3); // should be capped
+        assert!(app.diff_scroll <= 2);
+    }
+
+    #[test]
+    fn test_diff_scroll_down_no_scroll_when_content_fits() {
+        let mut app = app_with_diff(1);
+        // content = 5 lines, viewport = 20 → max_scroll = 0
+        app.diff_scroll_down(20);
+        assert_eq!(app.diff_scroll, 0);
     }
 }

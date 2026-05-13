@@ -36,13 +36,13 @@ This document tracks implementation status. Check items off as they are complete
 - [x] Tab to switch between panels
 - [x] Arrow key navigation within each panel
 - [x] File list: shows filename + status indicator `[M]`, `[A]`, `[D]`, `[R]`
-- [ ] File list: color-code by status (A=green, M=yellow, D=red, R=cyan)
+- [x] File list: color-code by status (A=green, M=yellow, D=red, R=cyan)
 - [x] Diff view: renders added/removed/context lines with color
-- [ ] Diff view: show line numbers alongside each line
-- [ ] Diff view: scroll upper-bound capping (currently can scroll past content)
+- [x] Diff view: show line numbers alongside each line
+- [x] Diff view: scroll upper-bound capping (viewport-aware, won't scroll past content)
 - [x] Hunk header display (cyan, bold+yellow when selected)
 - [x] `[` / `]` to jump between hunks (updates `selected_hunk`)
-- [ ] Hunk jump scrolls the diff view to bring selected hunk into view
+- [x] Hunk jump scrolls the diff view to bring selected hunk into view
 - [x] Enter on file list opens file and switches to diff panel
 - [x] Auto-load diff when navigating file list
 
@@ -71,7 +71,7 @@ This document tracks implementation status. Check items off as they are complete
 
 ## Tests
 - [x] `diff.rs`: 13 unit tests (hunk header parsing, diff parsing, line kinds, line numbers)
-- [x] `app.rs`: 19 unit tests (file navigation, hunk navigation, comment flow, state transitions)
+- [x] `app.rs`: 30 unit tests (file navigation, hunk navigation, scroll capping, hunk offset, comment flow, state transitions)
 - [x] `export.rs`: 11 unit tests (markdown format, JSON format, empty cases)
 - [x] `git.rs`: 7 unit tests (name-status parsing, edge cases)
 - [ ] Integration tests (approach TBD — likely a fixture git repo)

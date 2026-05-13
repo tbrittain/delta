@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 use crate::app::{App, FeedbackNote, Mode, Panel};
-use crate::diff::{ChangedFile, LineKind};
+use crate::diff::{ChangedFile, FileStatus, LineKind};
 use crate::git::GitBackend;
 
 pub fn run<G: GitBackend>(
@@ -88,7 +88,13 @@ fn run_event_loop<G: GitBackend>(
                     },
                     KeyCode::Down => match app.focused_panel {
                         Panel::FileList => app.file_list_down(),
-                        Panel::DiffView => app.diff_scroll_down(),
+                        Panel::DiffView => {
+                            let viewport = terminal
+                                .size()
+                                .map(|r| r.height.saturating_sub(3) as usize)
+                                .unwrap_or(20);
+                            app.diff_scroll_down(viewport);
+                        }
                     },
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
@@ -172,18 +178,29 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, f)| {
             let has_notes = app.notes.iter().any(|n| n.file == f.path);
             let note_marker = if has_notes { " ●" } else { "" };
-            let label = format!(
-                "[{}] {}{}",
-                f.status.indicator(),
-                f.path.display(),
-                note_marker
-            );
-            let style = if i == app.selected_file {
+
+            let status_color = match f.status {
+                FileStatus::Added => Color::Green,
+                FileStatus::Modified => Color::Yellow,
+                FileStatus::Deleted => Color::Red,
+                FileStatus::Renamed => Color::Cyan,
+            };
+            let base_style = if i == app.selected_file {
                 Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            ListItem::new(label).style(style)
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("[{}]", f.status.indicator()),
+                    base_style.fg(status_color),
+                ),
+                Span::styled(
+                    format!(" {}{}", f.path.display(), note_marker),
+                    base_style,
+                ),
+            ]);
+            ListItem::new(line)
         })
         .collect();
 
@@ -269,7 +286,19 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
                 LineKind::Removed => ("-", Style::default().fg(Color::Red)),
                 LineKind::Context => (" ", Style::default().fg(Color::Gray)),
             };
+            // Show the line number most relevant for this line kind:
+            // added/context → new file line number; removed → old file line number.
+            let lineno = match diff_line.kind {
+                LineKind::Removed => diff_line.old_lineno,
+                _ => diff_line.new_lineno,
+            };
+            let lineno_str = match lineno {
+                Some(n) => format!("{:>4}", n),
+                None => "    ".to_string(),
+            };
             lines.push(Line::from(vec![
+                Span::styled(lineno_str, Style::default().fg(Color::DarkGray)),
+                Span::styled(" ", Style::default().fg(Color::DarkGray)),
                 Span::styled(prefix, style),
                 Span::styled(diff_line.content.clone(), style),
             ]));
