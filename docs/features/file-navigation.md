@@ -63,3 +63,16 @@ All navigation is keyboard-only. Mouse clicks, scroll wheel, and text selection 
 - Click-to-position cursor in comment input
 
 **Priority:** Post-MVP. Would improve accessibility and feel more natural for users less comfortable with keyboard-only TUIs.
+
+---
+
+## In-app help
+
+No `?` keybind or help view exists. Users must consult the README or feature docs externally.
+
+**Possible directions:**
+- `?` opens an in-app help overlay listing all keybindings per panel (simplest)
+- Embed the feature markdown docs into the binary at compile time (via `include_str!`) and render them in a scrollable view
+- GitHub Pages site that renders the `docs/` directory — link surfaced via `delta --help` or the in-app help overlay
+
+**Priority:** Post-MVP. The status bar covers the essentials; full docs are for onboarding new users.
