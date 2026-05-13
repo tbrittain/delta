@@ -143,7 +143,8 @@ The panel title shows the current file and hunk position (`filename — 2/5`). T
 
 | Key | Action |
 |---|---|
-| `Enter` | Submit comment |
+| `Enter` | New line |
+| `Ctrl+D` | Submit comment |
 | `Esc` | Cancel |
 
 ---

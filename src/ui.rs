@@ -143,7 +143,9 @@ fn run_event_loop<G: GitBackend>(
             }
 
             Mode::Comment { mut input, hunk_idx } => match key.code {
-                KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+D submits — Ctrl+Enter is indistinguishable from Enter
+                // in most terminal emulators so we use Ctrl+D ("done") instead.
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.submit_comment();
                 }
                 KeyCode::Enter => {
@@ -657,7 +659,7 @@ mod tests {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
-        Mode::Comment { .. } => " Ctrl+Enter: submit  Enter: newline  Esc: cancel".to_string(),
+        Mode::Comment { .. } => " Ctrl+D: submit  Enter: newline  Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
             Panel::FileList => {
                 " Tab: diff view  ↑↓: navigate  Enter: open  q: quit".to_string()
