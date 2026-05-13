@@ -1,7 +1,9 @@
 mod common;
 
 use common::FixtureRepo;
+use delta::app::App;
 use delta::diff::{ChangedFile, FileStatus, LineKind, parse_diff};
+use delta::export;
 use delta::git::{GitBackend, SystemGit};
 
 // ── Git integration layer ─────────────────────────────────────────────────────
@@ -192,4 +194,103 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
             }
         }
     }
+}
+
+// ── Full pipeline (git → parse → app → export) ────────────────────────────────
+//
+// These tests substitute for a manual TUI smoke test. They exercise the entire
+// data pipeline — enumerating files, loading and parsing diffs, driving app
+// state, and producing export output — without requiring a real terminal.
+
+#[test]
+fn test_pipeline_enumerates_correct_files() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+
+    assert!(!files.is_empty());
+    let paths: Vec<String> = files.iter().map(|f| f.path.to_string_lossy().into()).collect();
+    assert!(paths.iter().any(|p| p.contains("main.rs")));
+    assert!(paths.iter().any(|p| p.contains("lib.rs")));
+    assert!(paths.iter().any(|p| p.contains("new.rs")));
+    assert!(paths.iter().any(|p| p.contains("deleted.rs")));
+}
+
+#[test]
+fn test_pipeline_loads_and_parses_diff_into_app() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+
+    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+
+    // Load the diff for the first file manually (as the TUI would on startup)
+    let path = app.files[app.selected_file].path.to_string_lossy().to_string();
+    let file = app.files[app.selected_file].clone();
+    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    app.current_diff = Some(parse_diff(&raw, file));
+
+    assert!(app.current_diff.is_some());
+    assert!(!app.current_diff.as_ref().unwrap().hunks.is_empty());
+}
+
+#[test]
+fn test_pipeline_comment_and_markdown_export() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+
+    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+
+    // Load diff for src/main.rs
+    let main_idx = app.files.iter().position(|f| f.path.ends_with("main.rs")).unwrap();
+    app.select_file(main_idx);
+    let path = app.files[app.selected_file].path.to_string_lossy().to_string();
+    let file = app.files[app.selected_file].clone();
+    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    app.current_diff = Some(parse_diff(&raw, file));
+
+    // Simulate the user pressing 'c' and submitting a comment
+    app.start_comment();
+    if let delta::app::Mode::Comment { ref mut input, .. } = app.mode {
+        input.push_str("This logging is too verbose");
+    }
+    app.submit_comment();
+
+    assert_eq!(app.notes.len(), 1);
+
+    // Export and verify structure
+    let md = export::to_markdown(&app.notes);
+    assert!(md.contains("main.rs"), "export should reference the file");
+    assert!(md.contains("This logging is too verbose"), "export should contain the note text");
+    assert!(md.contains("@@"), "export should include the hunk header");
+}
+
+#[test]
+fn test_pipeline_comment_and_json_export() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+
+    let mut app = App::new(files, FixtureRepo::BASE_REF.to_string());
+
+    let main_idx = app.files.iter().position(|f| f.path.ends_with("main.rs")).unwrap();
+    app.select_file(main_idx);
+    let path = app.files[app.selected_file].path.to_string_lossy().to_string();
+    let file = app.files[app.selected_file].clone();
+    let raw = git.file_diff(FixtureRepo::BASE_REF, &path).unwrap();
+    app.current_diff = Some(parse_diff(&raw, file));
+
+    app.start_comment();
+    if let delta::app::Mode::Comment { ref mut input, .. } = app.mode {
+        input.push_str("needs a test");
+    }
+    app.submit_comment();
+
+    let json = export::to_json(&app.notes).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let note = &parsed["notes"][0];
+
+    assert!(note["file"].as_str().unwrap().contains("main.rs"));
+    assert_eq!(note["note"], "needs a test");
 }
