@@ -38,3 +38,30 @@ New code must be structured so it can be tested without a real terminal, real gi
 - **Thin dispatchers are acceptable untested.** Code that does nothing except call other tested functions (e.g. `run_event_loop` matching a key and calling an `App` method) does not need its own unit test. The logic it dispatches to must be tested.
 
 If you find yourself writing logic inside a function that shells out or renders to the terminal, stop and extract it.
+
+---
+
+## Commit Style
+
+All commits must use **conventional commits** format:
+
+```
+<type>: <description>
+
+[optional body]
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+Types:
+- `feat:` — new user-facing feature
+- `fix:` — bug fix
+- `refactor:` — restructuring with no feature or fix
+- `test:` — adding or updating tests only
+- `docs:` — documentation changes only
+- `chore:` — maintenance, dependency updates, tooling
+- `ci:` — CI/CD workflow changes
+
+Breaking changes: append `!` after the type (`feat!:`) or add `BREAKING CHANGE:` in the footer.
+
+This convention is required because semver automation from commit history is planned for the future.
