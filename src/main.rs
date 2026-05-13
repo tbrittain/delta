@@ -33,16 +33,23 @@ struct Args {
     /// Export as JSON instead of markdown
     #[arg(long)]
     json: bool,
+
+    /// Internal: this instance was spawned by a parent delta to run in a new
+    /// terminal window. Skips TTY detection to prevent recursive spawning.
+    #[arg(long, hide = true)]
+    spawned: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    if !std::io::stdin().is_terminal() {
-        return run_in_spawned_terminal(&args);
+    // --spawned means we were deliberately launched in a new window by a parent
+    // delta process — always run the TUI regardless of TTY state.
+    if args.spawned || std::io::stdin().is_terminal() {
+        return run_tui(&args);
     }
 
-    run_tui(&args)
+    run_in_spawned_terminal(&args)
 }
 
 fn run_tui(args: &Args) -> Result<()> {
@@ -81,16 +88,17 @@ fn run_tui(args: &Args) -> Result<()> {
 fn run_in_spawned_terminal(args: &Args) -> Result<()> {
     let exe = std::env::current_exe()?;
 
-    // Write to a temp file; the inner instance handles its own --output if set
     let temp_path = std::env::temp_dir()
         .join(format!("delta-review-{}.md", std::process::id()));
 
-    // Build the inner delta invocation: same refs, always write to tempfile
+    // Pass --spawned so the inner instance always runs the TUI and never
+    // tries to spawn another window, regardless of its TTY state.
     let mut inner_args: Vec<String> = vec![
         args.from.clone(),
         args.to.clone(),
         "--output".to_string(),
         temp_path.to_string_lossy().into_owned(),
+        "--spawned".to_string(),
     ];
     if args.json {
         inner_args.push("--json".to_string());
@@ -98,7 +106,6 @@ fn run_in_spawned_terminal(args: &Args) -> Result<()> {
 
     spawn_and_wait(&exe, &inner_args)?;
 
-    // Read whatever the inner instance wrote
     let content = std::fs::read_to_string(&temp_path).unwrap_or_default();
     let _ = std::fs::remove_file(&temp_path);
 
@@ -106,7 +113,6 @@ fn run_in_spawned_terminal(args: &Args) -> Result<()> {
         return Ok(());
     }
 
-    // If the caller specified --output, honour it; otherwise print to stdout
     match &args.output {
         Some(path) => std::fs::write(path, &content)?,
         None => print!("{}", content),
@@ -115,8 +121,6 @@ fn run_in_spawned_terminal(args: &Args) -> Result<()> {
     Ok(())
 }
 
-/// Spawn delta in a new visible terminal window and wait for it to exit.
-/// Platform-specific: Windows uses CREATE_NEW_CONSOLE; Unix tries common emulators.
 fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
     #[cfg(target_os = "windows")]
     return spawn_and_wait_windows(exe, args);
@@ -125,18 +129,42 @@ fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
     return spawn_and_wait_unix(exe, args);
 }
 
-/// Windows: spawn with CREATE_NEW_CONSOLE so the OS opens a new visible console window.
-/// The new process inherits the environment (PATH, cwd) from the parent.
+/// Windows: use `cmd.exe /c start /wait` to open a new console window.
+///
+/// CREATE_NEW_CONSOLE was tried first but doesn't work: it creates the window
+/// but the child inherits the parent's stdin (a pipe), so is_terminal() still
+/// returns false and the child tries to spawn yet another window — infinite
+/// recursion. cmd.exe's `start` command creates a fresh process with its own
+/// console stdin not connected to the parent's pipe chain, so is_terminal()
+/// returns true in the inner delta. We also run cmd.exe itself with
+/// CREATE_NO_WINDOW so only the delta window is visible, not a cmd window.
 #[cfg(target_os = "windows")]
 fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    Command::new(exe)
-        .args(args)
-        .creation_flags(CREATE_NEW_CONSOLE)
+    let exe_str = exe.to_string_lossy();
+
+    // Quote a token for cmd.exe: wrap in double quotes, escape internal quotes.
+    let quote = |s: &str| -> String {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    };
+
+    let mut cmd_str = format!("start \"Delta Review\" /wait {}", quote(&exe_str));
+    for arg in args {
+        cmd_str.push(' ');
+        if arg.contains(' ') || arg.contains('"') || arg.is_empty() {
+            cmd_str.push_str(&quote(arg));
+        } else {
+            cmd_str.push_str(arg);
+        }
+    }
+
+    Command::new("cmd.exe")
+        .args(["/c", &cmd_str])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to open a new console window: {e}"))?
+        .map_err(|e| anyhow::anyhow!("Failed to open console window: {e}"))?
         .wait()?;
 
     Ok(())
