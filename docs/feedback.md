@@ -16,3 +16,17 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Virtual hunk splitting: break hunks above a certain line count into navigable chunks
 
 **Priority:** Revisit after more testing.
+
+---
+
+## Cannot diff between two arbitrary commits
+
+**Observed:** `delta` always diffs against HEAD. There is no way to compare two non-HEAD commits directly (e.g. `delta <commit-A> <commit-B>`). The workaround is a temporary `git worktree` pointed at one of the commits, then running delta from inside it with the other as the base ref.
+
+**Context:** Wanted to run delta over the range `42ce9f2..1aaaf25` (scaffold → refactoring pivot) as a real-world test case.
+
+**Possible directions:**
+- Add an optional second argument: `delta <from> <to>` diffs between two arbitrary refs
+- Keep the current single-ref model but document the worktree workaround
+
+**Priority:** Revisit after more testing.
