@@ -4,16 +4,21 @@ use serde::Serialize;
 use crate::app::FeedbackNote;
 
 pub fn to_markdown(notes: &[FeedbackNote]) -> String {
-    let mut out = String::from("# Delta Review\n\n");
+    let mut out = String::from(
+        "The following are code review notes from a human reviewer. \
+        Please address each item before proceeding.\n\n---\n\n",
+    );
 
     for note in notes {
-        let path = note.file.display();
-        out.push_str(&format!("## `{}`\n\n", path));
-        out.push_str(&format!("**Hunk:** `{}`\n\n", note.hunk_header));
-        out.push_str("```\n");
+        out.push_str(&format!(
+            "## `{}` · `{}`\n\n",
+            note.file.display(),
+            note.hunk_header,
+        ));
+        out.push_str("```diff\n");
         out.push_str(&note.hunk_content);
         out.push_str("\n```\n\n");
-        out.push_str(&format!("**Feedback:** {}\n\n", note.note));
+        out.push_str(&format!("**Human:** {}\n\n", note.note));
         out.push_str("---\n\n");
     }
 
@@ -107,17 +112,39 @@ mod tests {
     }
 
     #[test]
-    fn test_markdown_empty_notes() {
+    fn test_markdown_has_preamble() {
         let md = to_markdown(&[]);
-        assert!(md.starts_with("# Delta Review"));
-        // No note sections — just the header
-        assert!(!md.contains("**Hunk:**"));
+        assert!(md.contains("code review notes from a human reviewer"));
+        assert!(md.contains("Please address each item"));
     }
 
     #[test]
-    fn test_markdown_has_title() {
+    fn test_markdown_empty_notes_has_no_human_label() {
         let md = to_markdown(&[]);
-        assert!(md.starts_with("# Delta Review"));
+        assert!(!md.contains("**Human:**"));
+    }
+
+    #[test]
+    fn test_markdown_uses_human_label_not_feedback() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "too verbose")];
+        let md = to_markdown(&notes);
+        assert!(md.contains("**Human:**"));
+        assert!(!md.contains("**Feedback:**"));
+    }
+
+    #[test]
+    fn test_markdown_file_and_hunk_on_same_line() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "too verbose")];
+        let md = to_markdown(&notes);
+        // File path and hunk header should appear on the same header line
+        assert!(md.contains("`src/auth.rs` · `@@ -1,3 +1,4 @@`"));
+    }
+
+    #[test]
+    fn test_markdown_uses_diff_code_fence() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "too verbose")];
+        let md = to_markdown(&notes);
+        assert!(md.contains("```diff\n"));
     }
 
     // ── JSON export ───────────────────────────────────────────────────────────
