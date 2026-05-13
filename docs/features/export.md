@@ -71,6 +71,19 @@ export TERMINAL=gnome-terminal   # or xterm, kitty, alacritty, etc.
 
 ## Known issues / open feedback
 
+### No way to quit without exporting
+
+Pressing `q` always exports notes if any exist. There is no keybind to discard the session and exit cleanly without producing output — useful when you've left scratch notes or changed your mind about the review.
+
+**Possible directions:**
+- `Q` (shift-q) quits without exporting
+- A confirmation prompt when quitting with notes: "Export notes? (y/n)"
+- `Ctrl+Q` for discard-and-quit
+
+**Priority:** Low but useful. Workaround: quit and ignore/delete the output.
+
+---
+
 ### No mechanism to suppress the hunk code block
 
 The diff code block in the export gives the agent context, but for an agent that already has the full codebase available, it may be redundant noise. There is no flag to omit it.
