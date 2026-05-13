@@ -121,6 +121,7 @@ This document tracks implementation status. Check items off as they are complete
 ---
 
 ## Post-MVP (not scheduled)
+- [ ] Version indicator — show currently installed version somewhere in the TUI (status bar or panel title)
 - [ ] Syntax highlighting in diff view (syntect crate)
 - [ ] Renamed file: display old→new path in file list
 - [ ] Mouse support

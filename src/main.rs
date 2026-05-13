@@ -178,7 +178,9 @@ fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
         format!("\"{}\"", s.replace('"', "\"\""))
     };
 
-    let mut cmd_str = format!("start \"Delta Review\" /wait {}", quote(&exe_str));
+    // Empty title ("") is required — a non-empty title causes cmd.exe to
+    // treat it as the program name rather than the window title.
+    let mut cmd_str = format!("start \"\" /wait {}", quote(&exe_str));
     for arg in args {
         cmd_str.push(' ');
         if arg.contains(' ') || arg.contains('"') || arg.is_empty() {
