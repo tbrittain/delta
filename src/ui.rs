@@ -117,6 +117,16 @@ fn run_event_loop<G: GitBackend>(
                             app.start_comment();
                         }
                     }
+                    KeyCode::Char('e') => {
+                        if app.focused_panel == Panel::DiffView {
+                            app.edit_note_for_current_hunk();
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        if app.focused_panel == Panel::DiffView {
+                            app.delete_note_for_current_hunk();
+                        }
+                    }
                     _ => {}
                 }
 
@@ -481,9 +491,15 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     String::new()
                 };
+                let note_actions = if app.current_hunk_has_note() {
+                    "  e: edit  d: delete"
+                } else {
+                    "  c: comment"
+                };
                 format!(
-                    " Tab: file list  ↑↓: scroll  []: hunk  c: comment  q: quit{}",
-                    notes_str
+                    " Tab: file list  ↑↓: scroll  []: hunk{}  q: quit{}",
+                    note_actions,
+                    notes_str,
                 )
             }
         },

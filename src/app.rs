@@ -137,6 +137,43 @@ impl App {
         }).sum()
     }
 
+    /// Returns (file_path, hunk_header) for the currently selected hunk, or None.
+    /// Used as a lookup key for notes on the current hunk.
+    fn current_hunk_identity(&self) -> Option<(PathBuf, String)> {
+        let diff = self.current_diff.as_ref()?;
+        let hunk = diff.hunks.get(self.selected_hunk)?;
+        Some((diff.file.path.clone(), hunk.header.clone()))
+    }
+
+    pub fn current_hunk_has_note(&self) -> bool {
+        match self.current_hunk_identity() {
+            Some((file, header)) => self.notes.iter().any(|n| n.file == file && n.hunk_header == header),
+            None => false,
+        }
+    }
+
+    pub fn delete_note_for_current_hunk(&mut self) {
+        let Some((file, header)) = self.current_hunk_identity() else { return };
+        self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+    }
+
+    /// Remove the existing note for the current hunk and re-open the comment
+    /// input pre-populated with the old text so the user can revise it.
+    pub fn edit_note_for_current_hunk(&mut self) {
+        let Some((file, header)) = self.current_hunk_identity() else { return };
+        let existing = self.notes
+            .iter()
+            .find(|n| n.file == file && n.hunk_header == header)
+            .map(|n| n.note.clone());
+        if let Some(text) = existing {
+            self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+            self.mode = Mode::Comment {
+                hunk_idx: self.selected_hunk,
+                input: text,
+            };
+        }
+    }
+
     pub fn start_comment(&mut self) {
         if self.current_diff.as_ref().map(|d| !d.hunks.is_empty()).unwrap_or(false) {
             self.mode = Mode::Comment {
@@ -513,5 +550,113 @@ mod tests {
         // content = 5 lines, viewport = 20 → max_scroll = 0
         app.diff_scroll_down(20);
         assert_eq!(app.diff_scroll, 0);
+    }
+
+    // ── Edit / delete notes ───────────────────────────────────────────────────
+
+    fn app_with_note_on_hunk(hunk_idx: usize) -> App {
+        let mut app = app_with_diff(3);
+        app.selected_hunk = hunk_idx;
+        app.mode = Mode::Comment {
+            hunk_idx,
+            input: "original note".to_string(),
+        };
+        app.submit_comment();
+        app.selected_hunk = hunk_idx;
+        app
+    }
+
+    #[test]
+    fn test_current_hunk_has_note_true_when_note_exists() {
+        let app = app_with_note_on_hunk(0);
+        assert!(app.current_hunk_has_note());
+    }
+
+    #[test]
+    fn test_current_hunk_has_note_false_when_no_note() {
+        let app = app_with_diff(2);
+        assert!(!app.current_hunk_has_note());
+    }
+
+    #[test]
+    fn test_current_hunk_has_note_false_without_diff() {
+        let app = App::new(make_files(1), "main".to_string());
+        assert!(!app.current_hunk_has_note());
+    }
+
+    #[test]
+    fn test_delete_note_removes_it() {
+        let mut app = app_with_note_on_hunk(0);
+        app.delete_note_for_current_hunk();
+        assert!(app.notes.is_empty());
+    }
+
+    #[test]
+    fn test_delete_note_only_removes_current_hunk() {
+        let mut app = app_with_diff(3);
+        // Add notes on hunks 0 and 1
+        for hunk_idx in [0, 1] {
+            app.selected_hunk = hunk_idx;
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx) };
+            app.submit_comment();
+        }
+        // Delete note on hunk 0 only
+        app.selected_hunk = 0;
+        app.delete_note_for_current_hunk();
+
+        assert_eq!(app.notes.len(), 1);
+        assert!(app.notes[0].note.contains("note 1"));
+    }
+
+    #[test]
+    fn test_delete_note_no_op_when_no_note() {
+        let mut app = app_with_diff(2);
+        app.delete_note_for_current_hunk(); // should not panic
+        assert!(app.notes.is_empty());
+    }
+
+    #[test]
+    fn test_delete_note_no_op_without_diff() {
+        let mut app = App::new(make_files(1), "main".to_string());
+        app.delete_note_for_current_hunk(); // should not panic
+    }
+
+    #[test]
+    fn test_edit_note_enters_comment_mode_with_existing_text() {
+        let mut app = app_with_note_on_hunk(0);
+        app.edit_note_for_current_hunk();
+        assert!(matches!(
+            &app.mode,
+            Mode::Comment { input, .. } if input == "original note"
+        ));
+    }
+
+    #[test]
+    fn test_edit_note_removes_old_note_before_editing() {
+        let mut app = app_with_note_on_hunk(0);
+        app.edit_note_for_current_hunk();
+        // Note should be gone — it will be re-added on submit
+        assert!(app.notes.is_empty());
+    }
+
+    #[test]
+    fn test_edit_note_no_op_when_no_note() {
+        let mut app = app_with_diff(2);
+        app.edit_note_for_current_hunk();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_edit_then_submit_updates_note() {
+        let mut app = app_with_note_on_hunk(0);
+        app.edit_note_for_current_hunk();
+        // Simulate the user clearing the input and typing a new note
+        if let Mode::Comment { ref mut input, .. } = app.mode {
+            *input = "revised note".to_string();
+        }
+        app.submit_comment();
+
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.notes[0].note, "revised note");
     }
 }
