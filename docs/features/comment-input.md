@@ -58,6 +58,20 @@ Left/Right arrows move one character at a time. There is no word-jump (`Ctrl+←
 
 ---
 
+### Comment input below viewport when hunk is at the bottom of the screen
+
+**Observed:** When the selected hunk is near the bottom of the diff view, the inline comment input (which appears below the hunk's last line) renders outside the visible viewport. The first line of the input is cut off or invisible, and any wrapped continuation lines cannot be seen at all.
+
+**Root cause:** Entering comment mode does not adjust `diff_scroll` to ensure the input area is visible. The `Paragraph` widget clips content below the viewport.
+
+**Possible directions:**
+- When `start_comment` is called, scroll the diff view down enough to show the comment input area (estimate based on hunk position + line count)
+- Alternatively, reserve a fixed number of rows at the bottom of the diff panel when in comment mode
+
+**Priority:** Should fix — makes commenting on hunks near the bottom of the screen very confusing.
+
+---
+
 ### No multi-line visual scrolling in comment input
 
 The comment input renders inline in the diff view and does not scroll independently. For very long multi-line notes, the input area may push other content off screen.
