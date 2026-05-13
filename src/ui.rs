@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 
@@ -248,7 +248,8 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
                 .border_style(border_style)
                 .title(title),
         )
-        .scroll((app.diff_scroll as u16, 0));
+        .scroll((app.diff_scroll as u16, 0))
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(para, area);
 }
