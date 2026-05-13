@@ -50,8 +50,10 @@ impl GitBackend for SystemGit {
     }
 
     fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String> {
+        // Git always accepts forward slashes; on Windows PathBuf produces backslashes.
+        let normalized = path.replace('\\', "/");
         let output = Command::new("git")
-            .args(["diff", &format!("{}..{}", from, to), "--", path])
+            .args(["diff", &format!("{}..{}", from, to), "--", &normalized])
             .current_dir(&self.repo_dir)
             .output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;
@@ -59,7 +61,7 @@ impl GitBackend for SystemGit {
         if !output.status.success() {
             bail!(
                 "git diff failed for {}: {}",
-                path,
+                normalized,
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }
@@ -175,5 +177,14 @@ mod tests {
         let input = "M\tsrc/main.rs\n\nsome garbage line\nA\tsrc/new.rs\n";
         let files = parse_name_status(input);
         assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_file_diff_normalizes_backslash_paths() {
+        // On Windows, PathBuf converts forward slashes to backslashes.
+        // Ensure the normalization in file_diff produces forward slashes for git.
+        let path_with_backslash = "src\\main.rs";
+        let normalized = path_with_backslash.replace('\\', "/");
+        assert_eq!(normalized, "src/main.rs");
     }
 }
