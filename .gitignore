@@ -15,3 +15,8 @@ Thumbs.db
 # delta output files
 delta-review.md
 delta-review.json
+
+
+# Added by cargo
+
+/target
