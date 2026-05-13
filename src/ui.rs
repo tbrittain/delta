@@ -142,24 +142,38 @@ fn run_event_loop<G: GitBackend>(
                 }
             }
 
-            Mode::Comment { mut input, hunk_idx } => match key.code {
+            Mode::Comment { mut input, hunk_idx, mut cursor } => match key.code {
                 // Ctrl+D submits — Ctrl+Enter is indistinguishable from Enter
                 // in most terminal emulators so we use Ctrl+D ("done") instead.
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.submit_comment();
                 }
                 KeyCode::Enter => {
-                    input.push('\n');
-                    app.mode = Mode::Comment { hunk_idx, input };
+                    input.insert(cursor, '\n');
+                    cursor += 1;
+                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                }
+                KeyCode::Left => {
+                    cursor = cursor_prev(&input, cursor);
+                    app.mode = Mode::Comment { hunk_idx, input, cursor };
+                }
+                KeyCode::Right => {
+                    cursor = cursor_next(&input, cursor);
+                    app.mode = Mode::Comment { hunk_idx, input, cursor };
                 }
                 KeyCode::Esc => app.cancel_comment(),
                 KeyCode::Backspace => {
-                    input.pop();
-                    app.mode = Mode::Comment { hunk_idx, input };
+                    if cursor > 0 {
+                        let prev = cursor_prev(&input, cursor);
+                        input.drain(prev..cursor);
+                        cursor = prev;
+                    }
+                    app.mode = Mode::Comment { hunk_idx, input, cursor };
                 }
                 KeyCode::Char(c) => {
-                    input.push(c);
-                    app.mode = Mode::Comment { hunk_idx, input };
+                    input.insert(cursor, c);
+                    cursor += c.len_utf8();
+                    app.mode = Mode::Comment { hunk_idx, input, cursor };
                 }
                 _ => {}
             },
@@ -276,6 +290,22 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
         .wrap(Wrap { trim: false });
 
     frame.render_widget(para, area);
+}
+
+/// Move cursor one character to the left (byte-boundary safe).
+fn cursor_prev(s: &str, cursor: usize) -> usize {
+    if cursor == 0 { return 0; }
+    let mut pos = cursor - 1;
+    while pos > 0 && !s.is_char_boundary(pos) { pos -= 1; }
+    pos
+}
+
+/// Move cursor one character to the right (byte-boundary safe).
+fn cursor_next(s: &str, cursor: usize) -> usize {
+    if cursor >= s.len() { return s.len(); }
+    let mut pos = cursor + 1;
+    while pos < s.len() && !s.is_char_boundary(pos) { pos += 1; }
+    pos
 }
 
 fn push_diff_line(dl: &crate::diff::DiffLine, out: &mut Vec<Line<'static>>) {
@@ -401,21 +431,32 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
         if let Mode::Comment {
             hunk_idx: cidx,
             ref input,
+            cursor,
         } = app.mode
         {
             if cidx == hunk_idx {
                 let input_lines: Vec<&str> = input.split('\n').collect();
+                let pre_cursor = &input[..cursor];
+                let cursor_line_idx = pre_cursor.matches('\n').count();
+                let cursor_col = pre_cursor.split('\n').last().map(str::len).unwrap_or(0);
+
                 for (i, line_text) in input_lines.iter().enumerate() {
-                    let is_last = i == input_lines.len() - 1;
                     let mut spans: Vec<Span<'static>> = if i == 0 {
                         vec![Span::styled("  ▶ ", Style::default().fg(Color::Yellow))]
                     } else {
                         vec![Span::raw("    ")]
                     };
-                    spans.push(Span::raw(line_text.to_string()));
-                    if is_last {
+
+                    if i == cursor_line_idx {
+                        let before = line_text[..cursor_col].to_string();
+                        let after = line_text[cursor_col..].to_string();
+                        spans.push(Span::raw(before));
                         spans.push(Span::styled("█", Style::default().fg(Color::Yellow)));
+                        spans.push(Span::raw(after));
+                    } else {
+                        spans.push(Span::raw(line_text.to_string()));
                     }
+
                     lines.push(Line::from(spans));
                 }
             }
@@ -545,6 +586,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "line one\nline two\nline three".to_string(),
+            cursor: 0,
         };
         let text = build_diff_text(&app);
         let content = text_to_string(&text);
@@ -556,10 +598,9 @@ mod tests {
     #[test]
     fn test_multiline_comment_cursor_on_last_line_only() {
         let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment {
-            hunk_idx: 0,
-            input: "line one\nline two".to_string(),
-        };
+        let input = "line one\nline two".to_string();
+        let cursor = input.len(); // cursor at end — after "line two"
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor };
         let text = build_diff_text(&app);
         // Cursor █ should appear exactly once, on the last visual line
         let content = text_to_string(&text);
@@ -575,6 +616,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "first\nsecond".to_string(),
+            cursor: 0,
         };
         let text = build_diff_text(&app);
         let content = text_to_string(&text);

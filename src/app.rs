@@ -20,6 +20,8 @@ pub enum Mode {
     Comment {
         hunk_idx: usize,
         input: String,
+        /// Byte offset of the insertion cursor, always on a char boundary.
+        cursor: usize,
     },
 }
 
@@ -206,9 +208,11 @@ impl App {
             .map(|n| n.note.clone());
         if let Some(text) = existing {
             self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+            let cursor = text.len();
             self.mode = Mode::Comment {
                 hunk_idx: self.selected_hunk,
                 input: text,
+                cursor,
             };
         }
     }
@@ -221,13 +225,14 @@ impl App {
                 self.mode = Mode::Comment {
                     hunk_idx: self.selected_hunk,
                     input: String::new(),
+                    cursor: 0,
                 };
             }
         }
     }
 
     pub fn submit_comment(&mut self) {
-        if let Mode::Comment { hunk_idx, ref input } = self.mode.clone() {
+        if let Mode::Comment { hunk_idx, ref input, .. } = self.mode.clone() {
             let trimmed = input.trim().to_string();
             if !trimmed.is_empty() {
                 if let Some(ref diff) = self.current_diff {
@@ -498,6 +503,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "This looks wrong".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
 
@@ -512,6 +518,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "some note".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         assert_eq!(app.mode, Mode::Normal);
@@ -523,6 +530,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "   ".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         assert!(app.notes.is_empty());
@@ -534,6 +542,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "check this".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
 
@@ -550,6 +559,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 1,
             input: "note on second hunk".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
 
@@ -585,7 +595,7 @@ mod tests {
     fn test_hunk_scroll_offset_accounts_for_notes() {
         let mut app = app_with_diff(2);
         // Add a note on hunk 0
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string() };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0 };
         app.submit_comment();
         // hunk 0: 1 header + 3 lines + 1 note + 1 blank = 6
         assert_eq!(app.hunk_scroll_offset(1), 6);
@@ -659,6 +669,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx,
             input: "original note".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         app.selected_hunk = hunk_idx;
@@ -696,7 +707,7 @@ mod tests {
         // Add notes on hunks 0 and 1
         for hunk_idx in [0, 1] {
             app.selected_hunk = hunk_idx;
-            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx) };
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0 };
             app.submit_comment();
         }
         // Delete note on hunk 0 only
@@ -767,6 +778,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "line one\nline two\nline three".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two\nline three");
@@ -778,6 +790,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "\n\nline one\nline two\n\n".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two");
@@ -789,6 +802,7 @@ mod tests {
         app.mode = Mode::Comment {
             hunk_idx: 0,
             input: "\n\n\n".to_string(),
+            cursor: 0,
         };
         app.submit_comment();
         assert!(app.notes.is_empty(), "all-whitespace multi-line input should not create a note");
