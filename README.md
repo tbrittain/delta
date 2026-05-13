@@ -44,11 +44,19 @@ cargo build --release
 
 The binary is at `target/release/delta`.
 
-To install it to your Cargo bin directory:
+**To install to your PATH**, run from the repository root:
 
 ```bash
-cargo install --path .
+cargo install --path /path/to/delta
 ```
+
+For example, if you cloned to `~/source/delta`:
+
+```bash
+cargo install --path ~/source/delta
+```
+
+This installs the `delta` binary to `~/.cargo/bin/`, which is on your PATH if you followed the rustup installation. After that, `delta` works from any directory.
 
 ---
 
