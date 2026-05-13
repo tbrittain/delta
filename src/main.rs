@@ -1,6 +1,8 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
+use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::process::Command;
 
 use delta::export;
 use delta::git::{GitBackend, SystemGit};
@@ -30,6 +32,15 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if !std::io::stdin().is_terminal() {
+        return run_in_spawned_terminal(&args);
+    }
+
+    run_tui(&args)
+}
+
+fn run_tui(args: &Args) -> Result<()> {
     let git = SystemGit::new();
 
     let files = git.changed_files(&args.from, &args.to)?;
@@ -51,10 +62,89 @@ fn main() -> Result<()> {
         export::to_markdown(&notes)
     };
 
-    match args.output {
-        Some(path) => std::fs::write(&path, &output)?,
+    match &args.output {
+        Some(path) => std::fs::write(path, &output)?,
         None => print!("{}", output),
     }
 
     Ok(())
+}
+
+/// Called when delta is invoked without a TTY (e.g. from a Claude Code `!` command).
+/// Spawns a new terminal window running delta interactively, waits for it to close,
+/// then reads the output and prints it to stdout so the caller captures it.
+fn run_in_spawned_terminal(args: &Args) -> Result<()> {
+    let exe = std::env::current_exe()?;
+
+    // Write to a temp file; the inner instance handles its own --output if set
+    let temp_path = std::env::temp_dir()
+        .join(format!("delta-review-{}.md", std::process::id()));
+
+    // Build the inner delta invocation: same refs, always write to tempfile
+    let mut inner_args: Vec<String> = vec![
+        args.from.clone(),
+        args.to.clone(),
+        "--output".to_string(),
+        temp_path.to_string_lossy().into_owned(),
+    ];
+    if args.json {
+        inner_args.push("--json".to_string());
+    }
+
+    spawn_and_wait(&exe, &inner_args)?;
+
+    // Read whatever the inner instance wrote
+    let content = std::fs::read_to_string(&temp_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&temp_path);
+
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    // If the caller specified --output, honour it; otherwise print to stdout
+    match &args.output {
+        Some(path) => std::fs::write(path, &content)?,
+        None => print!("{}", content),
+    }
+
+    Ok(())
+}
+
+/// Try to spawn a terminal emulator running the given command, then wait for it to exit.
+/// Checks $TERMINAL first, then falls back through a list of common emulators.
+fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
+    // Each entry: (binary, flags that precede the command)
+    // $TERMINAL is checked first so users can override.
+    let mut candidates: Vec<(String, Vec<&str>)> = Vec::new();
+
+    if let Ok(term) = std::env::var("TERMINAL") {
+        candidates.push((term, vec!["-e"]));
+    }
+
+    candidates.extend([
+        ("xterm".into(),           vec!["-e"]),
+        ("kitty".into(),           vec!["--"]),
+        ("alacritty".into(),       vec!["-e"]),
+        ("gnome-terminal".into(),  vec!["--wait", "--"]),
+        ("konsole".into(),         vec!["-e"]),
+        ("xfce4-terminal".into(),  vec!["--disable-server", "-e"]),
+    ]);
+
+    for (term, flags) in &candidates {
+        let mut cmd = Command::new(term);
+        cmd.args(flags).arg(exe).args(args);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                child.wait()?;
+                return Ok(());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => bail!("Failed to launch {}: {}", term, e),
+        }
+    }
+
+    bail!(
+        "No terminal emulator found. Please run delta directly in a terminal, \
+        or set $TERMINAL to your preferred terminal emulator (e.g. export TERMINAL=xterm)."
+    )
 }
