@@ -97,3 +97,16 @@ Issues and observations collected from real usage. These are not bugs per se —
 - Keep the current single-ref model but document the worktree workaround
 
 **Priority:** Revisit after more testing.
+
+---
+
+## Syntax highlighting in diff view
+
+**Observed:** Diff lines are colored by change type (green/red/gray) but not by language syntax. Keywords, strings, and identifiers all render in the same flat color, making dense code harder to scan.
+
+**Possible directions:**
+- Integrate the `syntect` crate (Sublime Text grammars, pure Rust) to highlight tokens within each diff line, layered on top of the existing add/remove color
+- Detect language from file extension; fall back gracefully for unknown types
+- Highlight only added/context lines since removed lines are less critical to read carefully
+
+**Priority:** Post-MVP. Meaningful readability improvement, not blocking core workflow.
