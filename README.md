@@ -98,19 +98,25 @@ delta main --output review.md
 
 **Pipe output directly into a Claude Code conversation:**
 
-In Claude Code, prefix any shell command with `!` to run it inline and have the output land directly in the conversation:
+Run delta via Claude Code's `!` command prefix. Because delta is a TUI, it will automatically open a new terminal window for the review session. When you quit, the output is piped back into the conversation:
 
 ```bash
 ! delta main
 ```
 
-The review output appears immediately in the chat where Claude can read and act on it. To save to a file instead:
+Leave your notes in the terminal window, press `q` to quit, and the review appears in the chat for Claude to act on immediately.
+
+To save to a file instead:
 
 ```bash
-! delta main > review.md
+! delta main --output review.md
 ```
 
-Then reference the file in your message: *"Please address the feedback in review.md."*
+If no terminal window appears, set `$TERMINAL` to your preferred emulator:
+
+```bash
+export TERMINAL=gnome-terminal   # or xterm, kitty, alacritty, etc.
+```
 
 ---
 
