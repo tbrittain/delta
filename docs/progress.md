@@ -19,14 +19,14 @@ This document tracks implementation status. Check items off as they are complete
 - [x] Unified diff parser (`parse_diff`, `parse_hunk_header`)
 - [x] `GitBackend` trait + `SystemGit` implementation
 - [x] `parse_name_status` — pure function for parsing `git diff --name-status` output
-- [ ] Line number tracking is parsed into IR but not yet displayed
+- [x] Line numbers displayed in diff view (right-aligned, dark gray, per-line)
 
 ---
 
 ## Git Integration
 - [x] Enumerate changed files (`git diff <base>..HEAD --name-status`)
 - [x] Fetch per-file diff content (`git diff <base>..HEAD -- <file>`)
-- [ ] Handle renamed files properly (currently path contains both old and new names)
+- [x] Handle renamed files properly (extracts new path from `R100\told\tnew` format)
 
 ---
 
@@ -65,7 +65,7 @@ This document tracks implementation status. Check items off as they are complete
 - [x] `--output <file>` flag writes to file instead of stdout
 - [x] `--json` flag switches to JSON format
 - [x] Export only runs if there are notes (silent exit otherwise)
-- [ ] End-to-end export smoke test against a real repo
+- [x] End-to-end pipeline tests cover export without requiring a terminal
 
 ---
 

@@ -37,13 +37,17 @@ const HEAD_NEW: &str = r#"pub fn multiply(a: i32, b: i32) -> i32 {
 const BASE_DELETED: &str = r#"pub fn deprecated() {}
 "#;
 
+const BASE_TO_RENAME: &str = r#"pub fn before_rename() {}
+"#;
+
 // ── Fixture repo ──────────────────────────────────────────────────────────────
 
 /// A temporary git repository with a known two-commit history:
 ///
-/// - `HEAD^` (base): src/main.rs, src/lib.rs, src/deleted.rs
+/// - `HEAD^` (base): src/main.rs, src/lib.rs, src/deleted.rs, src/old_name.rs
 /// - `HEAD`  (tip):  src/main.rs (modified), src/lib.rs (modified),
-///                   src/new.rs (added), src/deleted.rs (deleted)
+///                   src/new.rs (added), src/deleted.rs (deleted),
+///                   src/old_name.rs → src/renamed.rs (renamed)
 ///
 /// Use `BASE_REF` as the base argument to `SystemGit` methods.
 pub struct FixtureRepo {
@@ -68,6 +72,7 @@ impl FixtureRepo {
         write_file(&path, "src/main.rs", BASE_MAIN);
         write_file(&path, "src/lib.rs", BASE_LIB);
         write_file(&path, "src/deleted.rs", BASE_DELETED);
+        write_file(&path, "src/old_name.rs", BASE_TO_RENAME);
         git(&["add", "."], &path);
         git(&["commit", "-m", "base commit"], &path);
 
@@ -76,6 +81,7 @@ impl FixtureRepo {
         write_file(&path, "src/lib.rs", HEAD_LIB);
         write_file(&path, "src/new.rs", HEAD_NEW);
         std::fs::remove_file(path.join("src/deleted.rs")).unwrap();
+        git(&["mv", "src/old_name.rs", "src/renamed.rs"], &path);
         git(&["add", "."], &path);
         git(&["commit", "-m", "feature changes"], &path);
 

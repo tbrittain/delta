@@ -89,8 +89,16 @@ pub fn parse_name_status(output: &str) -> Vec<ChangedFile> {
             _ => FileStatus::Modified,
         };
 
+        // Renames produce two tab-separated paths: "old_path\tnew_path".
+        // We only need the new path for display and diffing.
+        let path = if status == FileStatus::Renamed {
+            path_str.splitn(2, '\t').nth(1).unwrap_or(path_str)
+        } else {
+            path_str
+        };
+
         files.push(ChangedFile {
-            path: path_str.into(),
+            path: path.into(),
             status,
         });
     }
@@ -128,13 +136,22 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_name_status_renamed() {
+    fn test_parse_name_status_renamed_uses_new_path() {
         let input = "R100\tsrc/old.rs\tsrc/new.rs\n";
         let files = parse_name_status(input);
-        // splitn(2) on R100\told.rs\tnew.rs gives status="R100", path="old.rs\tnew.rs"
-        // path will contain both names; this is acceptable for MVP
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].status, FileStatus::Renamed);
+        assert_eq!(files[0].path, std::path::PathBuf::from("src/new.rs"));
+    }
+
+    #[test]
+    fn test_parse_name_status_renamed_discards_old_path() {
+        let input = "R075\tsrc/utils/old_name.rs\tsrc/utils/new_name.rs\n";
+        let files = parse_name_status(input);
+        assert_eq!(files.len(), 1);
+        // Must not contain the old path in any form
+        assert!(!files[0].path.to_string_lossy().contains("old_name"));
+        assert_eq!(files[0].path.to_string_lossy(), "src/utils/new_name.rs");
     }
 
     #[test]

@@ -9,11 +9,23 @@ use delta::git::{GitBackend, SystemGit};
 // ── Git integration layer ─────────────────────────────────────────────────────
 
 #[test]
-fn test_changed_files_returns_all_four() {
+fn test_changed_files_returns_all_five() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
-    assert_eq!(files.len(), 4);
+    assert_eq!(files.len(), 5);
+}
+
+#[test]
+fn test_changed_files_includes_renamed() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::BASE_REF).unwrap();
+    let renamed: Vec<_> = files.iter().filter(|f| f.status == FileStatus::Renamed).collect();
+    assert_eq!(renamed.len(), 1);
+    // Must show the new path, not the old one
+    assert!(renamed[0].path.ends_with("renamed.rs"), "got {:?}", renamed[0].path);
+    assert!(!renamed[0].path.to_string_lossy().contains("old_name"));
 }
 
 #[test]
