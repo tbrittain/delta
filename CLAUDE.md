@@ -75,3 +75,15 @@ Types:
 Breaking changes: append `!` after the type (`feat!:`) or add `BREAKING CHANGE:` in the footer.
 
 This convention is required because semver automation from commit history is planned for the future.
+
+---
+
+## Feature docs & planned improvements
+
+All planned features, design notes, and improvement ideas live in **`docs/features/<module>.md`**, one file per source module (e.g. `docs/features/ui.md` for `src/ui.rs`).
+
+Rules:
+- Each feature doc describes **current state first**, then planned improvements. It must stay accurate — update it whenever the module changes significantly.
+- When a new module is added (or an existing module is split), create the corresponding feature doc immediately.
+- Do **not** create top-level catch-all docs like `planned-features.md`. Ideas go in the doc of the module they most naturally belong to.
+- Cross-reference related modules when a feature touches multiple files (e.g. "see also `git.md`").
