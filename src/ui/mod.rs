@@ -525,6 +525,64 @@ mod tests {
         span.style.bg == Some(SEL_BG)
     }
 
+    fn diff_view_rendered(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_diff_view(f, app, f.area())).unwrap();
+        terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect()
+    }
+
+    /// Build an App whose diff contains a single added line with `content`.
+    fn app_with_single_line(content: &str) -> App {
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
+        app.focused_panel = Panel::DiffView;
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: vec![Hunk {
+                header: "@@ -1,1 +1,1 @@".to_string(),
+                old_start: 1, new_start: 1,
+                lines: vec![DiffLine {
+                    old_lineno: None, new_lineno: Some(1),
+                    kind: LineKind::Added, content: content.to_string(),
+                }],
+            }],
+        });
+        app
+    }
+
+    // ── Diff view wrap regression guard ──────────────────────────────────────
+    //
+    // These tests render the diff view in a narrow terminal and count how many
+    // characters of the line content are visible.  With Wrap enabled every
+    // character must appear; without Wrap only the first (panel_width - 6)
+    // characters can fit before the line is clipped — the assertion fails.
+
+    #[test]
+    fn test_diff_view_wraps_long_lines_full_content_visible() {
+        // Use a rare Unicode character so counts aren't polluted by decorations.
+        let content = "Q".repeat(60);
+        // Panel: 40 cols wide, borders=2, gutter=6 → content area = 32 cols.
+        // Line total = 6 + 60 = 66 cols → wraps to 3 rows.
+        // Row 1: gutter + Q*32  (38 total, padded to 40)
+        // Row 2: Q*28            (padded to 40)
+        // All 60 Q chars must appear somewhere in the buffer.
+        let rendered = diff_view_rendered(&app_with_single_line(&content), 40, 10);
+        let q_count = rendered.chars().filter(|&c| c == 'Q').count();
+        assert_eq!(q_count, 60,
+            "diff view wrap: all 60 Q chars should be visible; got {} \
+             (likely caused by Wrap being disabled — only the first ~32 fit per row)", q_count);
+    }
+
+    #[test]
+    fn test_diff_view_short_line_fits_in_one_row() {
+        // A short line should still render correctly (no spurious wrapping).
+        let content = "Q".repeat(20); // 6 + 20 = 26 < 40 panel width — no wrap needed
+        let rendered = diff_view_rendered(&app_with_single_line(&content), 40, 10);
+        let q_count = rendered.chars().filter(|&c| c == 'Q').count();
+        assert_eq!(q_count, 20, "short diff line should render all 20 chars");
+    }
+
     fn popup_rendered(app: &App) -> String {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
