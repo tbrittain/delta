@@ -2,78 +2,66 @@
 
 ## How it works
 
-Press `c` on any hunk in the diff view to open the comment input. If the hunk already has a note, `c` redirects to edit mode rather than opening a blank input.
+Press `c` on any hunk in the diff view to open the comment input. If the hunk already has a note, `c` redirects to edit mode pre-populated with the existing text.
 
-The input appears inline below the hunk, prefixed with `▶`. A block cursor `█` shows the current insert position.
+The input opens as a **modal popup** overlaid on the diff view. The popup title shows the hunk header (`@@ -10,5 +10,6 @@`) so it is always clear which hunk is being commented on. A blinking bar (caret) cursor is used — it sits at the insertion point without displacing characters. Text wraps within the popup.
 
 **Keys in comment mode:**
 
 | Key | Action |
 |---|---|
-| `Enter` | Insert a newline (multi-line input) |
-| `Ctrl+D` | Submit the comment |
-| `Esc` | Cancel without saving |
-| `←` / `→` | Move cursor left/right |
-| `Backspace` | Delete the character before the cursor |
+| `Enter` | Insert a newline |
+| `Ctrl+S` | Submit the comment |
+| `Esc` | Cancel — restores the original note if editing |
+| `←` / `→` | Move cursor one character |
+| `↑` / `↓` | Move cursor one visual line (handles wrapped text) |
+| `Home` / `End` | Jump to start/end of current logical line |
+| `Ctrl+←` / `Ctrl+→` | Word-level jump |
+| `Ctrl+Shift+←` / `Ctrl+Shift+→` | Word-level jump with selection |
+| `Shift+arrow` | Extend selection |
+| `Ctrl+A` | Select all |
+| `Ctrl+C` | Copy selection to clipboard |
+| `Ctrl+V` | Paste from clipboard (replaces selection if active) |
+| `Ctrl+X` | Cut selection to clipboard |
+| `Backspace` / `Delete` | Delete char before/after cursor; deletes selection if active |
 
-**Note:** `Ctrl+Enter` is indistinguishable from `Enter` in most terminal emulators. `Ctrl+D` ("done") is used for submission instead.
+Typing any character while text is selected replaces the selection (standard editor behaviour).
 
-Once submitted, notes display inline in the diff with a `◎` marker. Multi-line notes render with the `◎` on the first line and indented continuation lines.
+`Ctrl+C` is captured in raw terminal mode (crossterm disables signal processing), so it does not send SIGINT — it copies.
+
+Once submitted, notes display inline in the diff with a `◎` marker (soft blue, italic). Long note lines are truncated with `…` at the diff panel edge. Multi-line notes render with `◎` on the first line and indented continuation lines.
 
 ### Editing and deleting existing notes
 
 When the selected hunk has a note, the status bar shows `e: edit  d: delete` instead of `c: comment`.
 
-- `e` — removes the existing note and re-opens the comment input with the old text pre-populated and the cursor at the end
+- `e` — removes the existing note and re-opens the comment popup pre-populated with the old text
 - `d` — deletes the note immediately
 - `c` — also redirects to edit when a note exists (same as `e`)
+
+`Esc` during an edit always restores the original note — cancelling never loses data.
 
 ---
 
 ## Known issues / open feedback
 
-### Cursor can only move character by character
+### No line-level (sub-hunk) commenting
 
-Left/Right arrows move one character at a time. There is no word-jump (`Ctrl+←`/`Ctrl+→`), no Home/End, and no mouse click-to-position. For long notes, editing content in the middle requires holding down the arrow key.
+Comments attach to a whole hunk. There is no way to select specific changed lines within a hunk and annotate only those lines.
 
-**Possible directions:**
-- `Ctrl+Left`/`Ctrl+Right` for word-level jumps
-- `Home`/`End` to jump to start/end of current line
-- `Ctrl+A`/`Ctrl+E` (Unix readline conventions)
+**Design sketch:**
+- `v` enters line-select mode in the diff view; arrow keys extend the selection; `c` opens the comment popup for that line range.
+- The exported note would include the line range (e.g. `@@ -10,5 +10,6 @@ lines 12–14`).
+- `FeedbackNote` gains a `line_range: Option<(u32, u32)>` field.
+- Multiple notes per hunk become possible once the key includes the line range.
+- The inline `◎` marker anchors to the last selected line rather than the hunk footer.
 
-**Priority:** Medium. Workable but tedious on long notes.
-
----
-
-### Enter keybind is counterintuitive for users expecting cancel
-
-**Observed:** When editing a comment, pressing `Enter` expecting it to cancel/revert changes instead inserts a newline. Users coming from contexts where Enter = confirm/cancel may be surprised.
-
-**Note:** Pressing `Esc` after `Enter` inserts a newline does not help recover — `Esc` cancels the whole session. This was previously a data-loss bug (Esc during an edit permanently deleted the original note); that bug is now fixed — `Esc` always restores the original note.
-
-**Possible directions:**
-- Better onboarding: ensure the status bar is prominent enough that `Ctrl+D: submit` is seen before the user presses Enter
-
-**Priority:** Low — status bar documents the keybinds clearly. More of a first-use surprise.
+**Priority:** High value. Significant data-model and UX change — design carefully before implementing.
 
 ---
 
-### Comment input below viewport when hunk is at the bottom of the screen
+### No mouse click-to-position in the comment popup
 
-**Observed:** When the selected hunk is near the bottom of the diff view, the inline comment input (which appears below the hunk's last line) renders outside the visible viewport. The first line of the input is cut off or invisible, and any wrapped continuation lines cannot be seen at all.
+The cursor can be moved only by keyboard. Clicking inside the popup to reposition the cursor is not supported.
 
-**Root cause:** Entering comment mode does not adjust `diff_scroll` to ensure the input area is visible. The `Paragraph` widget clips content below the viewport.
-
-**Possible directions:**
-- When `start_comment` is called, scroll the diff view down enough to show the comment input area (estimate based on hunk position + line count)
-- Alternatively, reserve a fixed number of rows at the bottom of the diff panel when in comment mode
-
-**Resolved:** When `c` or `e` is pressed, `scroll_to_show_comment_input` adjusts `diff_scroll` so the comment input is visible before the first render.
-
----
-
-### No multi-line visual scrolling in comment input
-
-The comment input renders inline in the diff view and does not scroll independently. For very long multi-line notes, the input area may push other content off screen.
-
-**Priority:** Low for now.
+**Priority:** Post-MVP.

@@ -57,6 +57,18 @@ pub struct App {
     pub selected_note: usize,
     /// Which notes are expanded to show full text in the Notes panel.
     pub expanded_notes: HashSet<usize>,
+    /// Scroll offset within the comment popup (logical lines).
+    pub comment_scroll: usize,
+    /// Byte offset of the selection anchor; `None` means no active selection.
+    /// The selected range is `min(cursor, anchor)..max(cursor, anchor)`.
+    pub comment_anchor: Option<usize>,
+    /// Scroll offset (visual rows) for the notes panel. Updated after every navigation action
+    /// so the selected note is always visible within the panel viewport.
+    pub notes_scroll: usize,
+    /// Inner width of the diff panel (terminal columns, excluding file-list panel and borders).
+    /// Updated by the event loop before each draw. Used to compute accurate visual row counts
+    /// when wrap is enabled. Zero means "no wrap accounting" (treats every line as 1 row).
+    pub diff_view_content_width: usize,
 }
 
 impl App {
@@ -77,6 +89,10 @@ impl App {
             expanded_hunks: HashSet::new(),
             selected_note: 0,
             expanded_notes: HashSet::new(),
+            comment_scroll: 0,
+            comment_anchor: None,
+            notes_scroll: 0,
+            diff_view_content_width: 0,
         }
     }
 
@@ -103,6 +119,24 @@ impl App {
         }
     }
 
+    /// Adjust `notes_scroll` so the selected note is within the viewport.
+    /// `viewport_height` is the inner content height of the notes panel (panel rows − 2 borders).
+    pub fn scroll_notes_to_selected(&mut self, viewport_height: usize) {
+        if self.notes.is_empty() || viewport_height == 0 { return; }
+        let note_start: usize = self.notes[..self.selected_note].iter().enumerate()
+            .map(|(i, n)| note_visual_rows(n, self.expanded_notes.contains(&i)))
+            .sum();
+        let note_h = note_visual_rows(
+            &self.notes[self.selected_note],
+            self.expanded_notes.contains(&self.selected_note),
+        );
+        if note_start < self.notes_scroll {
+            self.notes_scroll = note_start;
+        } else if note_start + note_h > self.notes_scroll + viewport_height {
+            self.notes_scroll = (note_start + note_h).saturating_sub(viewport_height);
+        }
+    }
+
     pub fn toggle_note_expand(&mut self) {
         if self.expanded_notes.contains(&self.selected_note) {
             self.expanded_notes.remove(&self.selected_note);
@@ -119,11 +153,10 @@ impl App {
 
     /// Deletes the note currently selected in the Notes panel.
     pub fn delete_selected_note(&mut self) {
-        if self.selected_note >= self.notes.len() {
-            return;
-        }
+        if self.selected_note >= self.notes.len() { return; }
         self.notes.remove(self.selected_note);
         self.expanded_notes.clear();
+        self.notes_scroll = 0;
         if self.selected_note > 0 && self.selected_note >= self.notes.len() {
             self.selected_note -= 1;
         }
@@ -192,36 +225,36 @@ impl App {
     /// Accounts for folded context runs so hunk-jump scrolls to the right position.
     fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
+        let pw = self.diff_view_content_width;
         let mut offset = 0;
         for (i, hunk) in diff.hunks.iter().enumerate() {
-            if i >= target_hunk {
-                break;
-            }
+            if i >= target_hunk { break; }
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                hunk.lines.len()
+                hunk.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
             } else {
-                context_run_visual_lines(&hunk.lines)
+                context_run_visual_lines(&hunk.lines, pw)
             };
             let note_count = self.notes
                 .iter()
                 .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
                 .count();
-            offset += 1 + content_lines + note_count + 1; // header + lines + notes + blank
+            offset += 1 + content_lines + note_count + 1;
         }
         offset
     }
 
     /// Total rendered line count for the current diff, used to cap scroll.
-    /// Accounts for folded context runs.
+    /// Accounts for folded context runs and per-line visual row counts when wrap is on.
     fn diff_content_lines(&self) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
+        let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                h.lines.len()
+                h.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
             } else {
-                context_run_visual_lines(&h.lines)
+                context_run_visual_lines(&h.lines, pw)
             };
             let note_count = self.notes
                 .iter()
@@ -231,44 +264,18 @@ impl App {
         }).sum()
     }
 
-    /// Collect the visual line count and note count for the selected hunk,
-    /// used to calculate where the comment input will appear.
-    fn comment_input_position_data(&self) -> Option<(usize, usize)> {
-        let diff = self.current_diff.as_ref()?;
-        let hunk = diff.hunks.get(self.selected_hunk)?;
-        let is_expanded = self.expanded_hunks.contains(&self.selected_hunk);
-        let content_lines = if is_expanded {
-            hunk.lines.len()
-        } else {
-            context_run_visual_lines(&hunk.lines)
+    /// Adjust `comment_scroll` so the cursor stays visible within the popup viewport.
+    /// `content_width` is the number of characters per visual line (popup width minus borders);
+    /// it is used to compute the correct visual row when long lines wrap.
+    pub fn scroll_comment_to_cursor(&mut self, viewport_height: usize, content_width: usize) {
+        let cursor_visual_row = match &self.mode {
+            Mode::Comment { input, cursor, .. } => visual_row_for_cursor(input, *cursor, content_width),
+            _ => return,
         };
-        let note_count = self.notes
-            .iter()
-            .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
-            .count();
-        Some((content_lines, note_count))
-    }
-
-    /// Scroll the diff view so the comment cursor line stays visible.
-    ///
-    /// Reads the current cursor position from `self.mode` so it works both on
-    /// first entry (cursor line 0) and as the comment grows (cursor on line N).
-    /// Only scrolls down — never jumps up — so it is safe to call on every keypress.
-    pub fn scroll_to_show_comment_cursor(&mut self, viewport_height: usize) {
-        let cursor_line = match &self.mode {
-            Mode::Comment { input, cursor, .. } => input[..*cursor].matches('\n').count(),
-            _ => 0,
-        };
-        let Some((content_lines, note_count)) = self.comment_input_position_data() else {
-            return;
-        };
-        let hunk_start = self.hunk_scroll_offset(self.selected_hunk);
-        // Comment block starts after: hunk header (1) + diff content + existing notes.
-        // The cursor sits cursor_line rows below that start.
-        let cursor_row = hunk_start + 1 + content_lines + note_count + cursor_line;
-        let needed = (cursor_row + 2).saturating_sub(viewport_height);
-        if self.diff_scroll < needed {
-            self.diff_scroll = needed;
+        if cursor_visual_row < self.comment_scroll {
+            self.comment_scroll = cursor_visual_row;
+        } else if viewport_height > 0 && cursor_visual_row + 1 > self.comment_scroll + viewport_height {
+            self.comment_scroll = cursor_visual_row + 1 - viewport_height;
         }
     }
 
@@ -291,6 +298,7 @@ impl App {
         let Some((file, header)) = self.current_hunk_identity() else { return };
         self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
         self.expanded_notes.clear();
+        self.notes_scroll = 0;
         if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
             self.selected_note = self.notes.len() - 1;
         }
@@ -311,6 +319,8 @@ impl App {
             }
             let cursor = original.note.len();
             let input = original.note.clone();
+            self.comment_scroll = 0;
+            self.comment_anchor = None;
             self.mode = Mode::Comment {
                 hunk_idx: self.selected_hunk,
                 input,
@@ -325,6 +335,8 @@ impl App {
             if self.current_hunk_has_note() {
                 self.edit_note_for_current_hunk();
             } else {
+                self.comment_scroll = 0;
+                self.comment_anchor = None;
                 self.mode = Mode::Comment {
                     hunk_idx: self.selected_hunk,
                     input: String::new(),
@@ -365,6 +377,8 @@ impl App {
                 }
             }
         }
+        self.comment_scroll = 0;
+        self.comment_anchor = None;
         self.mode = Mode::Normal;
     }
 
@@ -375,13 +389,38 @@ impl App {
                 self.notes.push(note);
             }
         }
+        self.comment_scroll = 0;
+        self.comment_anchor = None;
         self.mode = Mode::Normal;
     }
 }
 
+/// Visual rows occupied by one note entry in the notes panel.
+/// Collapsed: header + first-line-of-note + blank = 3 rows.
+/// Expanded: header + all note lines + blank.
+fn note_visual_rows(note: &FeedbackNote, expanded: bool) -> usize {
+    if expanded {
+        1 + note.note.lines().count().max(1) + 1
+    } else {
+        3
+    }
+}
+
+/// Number of visual (screen) rows a single diff line occupies when the diff panel
+/// wraps at `panel_width` columns. `panel_width` is the full inner width of the diff
+/// panel including the 6-column gutter (4 lineno + 1 space + 1 prefix).
+/// Returns 1 when `panel_width` is 0 (wrap accounting disabled).
+pub(crate) fn visual_rows_for_diff_line(content: &str, panel_width: usize) -> usize {
+    if panel_width == 0 { return 1; }
+    let total = 6 + content.chars().count(); // gutter always occupies 6 chars on the first row
+    (total + panel_width - 1) / panel_width
+}
+
 /// Count the visual lines a slice of diff lines occupies when context runs are folded.
 /// Runs of context lines >= FOLD_THRESHOLD collapse to a single placeholder line.
-fn context_run_visual_lines(lines: &[DiffLine]) -> usize {
+/// `panel_width` is passed to `visual_rows_for_diff_line` for non-context (changed) lines;
+/// context lines are assumed short and counted as 1 row each.
+fn context_run_visual_lines(lines: &[DiffLine], panel_width: usize) -> usize {
     let mut count = 0;
     let mut ctx_run = 0;
     for line in lines {
@@ -390,7 +429,7 @@ fn context_run_visual_lines(lines: &[DiffLine]) -> usize {
         } else {
             count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
             ctx_run = 0;
-            count += 1;
+            count += visual_rows_for_diff_line(&line.content, panel_width);
         }
     }
     count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
@@ -411,6 +450,50 @@ fn hunk_has_foldable_context(lines: &[DiffLine]) -> bool {
         }
     }
     false
+}
+
+/// Returns the visual row index of `cursor` within `input`, accounting for line wrapping
+/// at `content_width` characters. Used by `scroll_comment_to_cursor`.
+pub(crate) fn visual_row_for_cursor(input: &str, cursor: usize, content_width: usize) -> usize {
+    let cw = content_width.max(1);
+    let mut visual_row = 0usize;
+    let mut byte_pos = 0usize;
+    for logical_line in input.split('\n') {
+        let char_count = logical_line.chars().count();
+        let line_byte_end = byte_pos + logical_line.len();
+        if cursor >= byte_pos && cursor <= line_byte_end {
+            let char_offset = logical_line[..cursor - byte_pos].chars().count();
+            // Cursor at end of line (char_offset == char_count) belongs to the last visual row,
+            // not the (out-of-range) row after it.
+            let clamped = if char_count == 0 { 0 } else { char_offset.min(char_count - 1) };
+            return visual_row + clamped / cw;
+        }
+        visual_row += if char_count == 0 { 1 } else { (char_count + cw - 1) / cw };
+        byte_pos = line_byte_end + 1;
+    }
+    visual_row.saturating_sub(1)
+}
+
+/// Returns `Some((start, end))` where `start < end` if there is a non-empty selection,
+/// `None` otherwise.
+pub(crate) fn selected_range(cursor: usize, anchor: Option<usize>) -> Option<(usize, usize)> {
+    let a = anchor?;
+    let start = cursor.min(a);
+    let end = cursor.max(a);
+    if start < end { Some((start, end)) } else { None }
+}
+
+/// Delete the selected byte range from `input` and return `(new_input, new_cursor)`.
+/// Returns `None` if there is no non-empty selection.
+pub(crate) fn delete_selection(
+    input: &str,
+    cursor: usize,
+    anchor: Option<usize>,
+) -> Option<(String, usize)> {
+    let (start, end) = selected_range(cursor, anchor)?;
+    let mut new_input = input.to_string();
+    new_input.drain(start..end);
+    Some((new_input, start))
 }
 
 #[cfg(test)]
@@ -794,47 +877,94 @@ mod tests {
         assert_eq!(app.diff_scroll, 0);
     }
 
-    // ── Comment input viewport scrolling ─────────────────────────────────────
+    // ── visual_row_for_cursor ─────────────────────────────────────────────────
 
     #[test]
-    fn test_scroll_to_show_comment_cursor_adjusts_when_below_viewport() {
-        let mut app = app_with_diff(3);
-        // Select hunk 2 (starts at offset 10: two hunks of 5 lines each)
-        app.selected_hunk = 2;
-        // Comment starts at: hunk_start(2)=10 +1 header +3 lines +0 notes = row 14.
-        // cursor_line=0 (Normal mode fallback), so cursor_row=14.
-        // viewport 10 → needed = (14+2)-10 = 6
-        app.scroll_to_show_comment_cursor(10);
-        assert!(app.diff_scroll >= 6, "scroll should bring comment input into view");
+    fn test_visual_row_no_wrap() {
+        // Width > line length: no wrapping, rows == logical line indices.
+        assert_eq!(visual_row_for_cursor("hello\nworld", 0,   100), 0); // start of "hello"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 5,   100), 0); // end of "hello"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 6,   100), 1); // start of "world"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 11,  100), 1); // end of "world"
     }
 
     #[test]
-    fn test_scroll_to_show_comment_cursor_follows_multiline_input() {
-        let mut app = app_with_diff(3);
-        app.selected_hunk = 2;
-        // Put the cursor on line 2 of the comment (two newlines before it).
-        let input = "line one\nline two\nline three".to_string();
-        let cursor = input.len();
-        app.mode = Mode::Comment { hunk_idx: 2, input, cursor, original: None };
-        // comment_start = 10+1+3+0 = 14; cursor_line=2; cursor_row=16
-        // viewport 10 → needed = (16+2)-10 = 8
-        app.scroll_to_show_comment_cursor(10);
-        assert!(app.diff_scroll >= 8, "scroll should follow cursor to line 3");
+    fn test_visual_row_with_wrap() {
+        // "hellothere" with width=5 wraps to ["hello"(row 0), "there"(row 1)]
+        assert_eq!(visual_row_for_cursor("hellothere", 0, 5), 0);
+        assert_eq!(visual_row_for_cursor("hellothere", 4, 5), 0); // in "hello"
+        assert_eq!(visual_row_for_cursor("hellothere", 5, 5), 1); // start of "there"
+        assert_eq!(visual_row_for_cursor("hellothere", 10, 5), 1); // end of "there"
     }
 
     #[test]
-    fn test_scroll_to_show_comment_cursor_no_op_when_already_visible() {
+    fn test_visual_row_multiline_with_wrap() {
+        // "hi\nhellothere" with width=5:
+        //   row 0: "hi"        (bytes 0..2)
+        //   row 1: "hello"     (bytes 3..7 in full input = chars 0..4 of "hellothere")
+        //   row 2: "there"     (bytes 8..12 in full input = chars 5..9 of "hellothere")
+        let input = "hi\nhellothere";
+        assert_eq!(visual_row_for_cursor(input, 0,  5), 0); // 'h' of "hi"
+        assert_eq!(visual_row_for_cursor(input, 2,  5), 0); // end of "hi"
+        assert_eq!(visual_row_for_cursor(input, 3,  5), 1); // 'h' = first char of "hellothere"
+        assert_eq!(visual_row_for_cursor(input, 7,  5), 1); // 'o' = char 4 of "hellothere"
+        assert_eq!(visual_row_for_cursor(input, 8,  5), 2); // 't' = char 5 of "hellothere", first of "there"
+        assert_eq!(visual_row_for_cursor(input, 13, 5), 2); // end of "hellothere"
+    }
+
+    // ── Comment popup scrolling ───────────────────────────────────────────────
+
+    #[test]
+    fn test_scroll_comment_to_cursor_scrolls_down_when_cursor_below_viewport() {
         let mut app = app_with_diff(1);
-        // Hunk 0: comment starts at row 4. With viewport 20, already visible.
-        app.scroll_to_show_comment_cursor(20);
-        assert_eq!(app.diff_scroll, 0);
+        let input = "a\nb\nc\nd\ne".to_string();
+        let cursor = input.len(); // cursor on visual row 4 (width=100: no wrap)
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None };
+        app.scroll_comment_to_cursor(3, 100);
+        assert_eq!(app.comment_scroll, 2); // 4+1-3 = 2
     }
 
     #[test]
-    fn test_scroll_to_show_comment_cursor_no_op_without_diff() {
-        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
-        app.scroll_to_show_comment_cursor(20); // should not panic
-        assert_eq!(app.diff_scroll, 0);
+    fn test_scroll_comment_to_cursor_no_scroll_when_cursor_visible() {
+        let mut app = app_with_diff(1);
+        let input = "line1\nline2".to_string();
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 5, original: None };
+        app.scroll_comment_to_cursor(5, 100);
+        assert_eq!(app.comment_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_comment_to_cursor_scrolls_up_when_cursor_above_viewport() {
+        let mut app = app_with_diff(1);
+        let input = "a\nb\nc\nd\ne".to_string();
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 0, original: None };
+        app.comment_scroll = 3;
+        app.scroll_comment_to_cursor(3, 100);
+        assert_eq!(app.comment_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_comment_to_cursor_no_op_outside_comment_mode() {
+        let mut app = app_with_diff(1);
+        app.comment_scroll = 5;
+        app.scroll_comment_to_cursor(10, 100);
+        assert_eq!(app.comment_scroll, 5);
+    }
+
+    #[test]
+    fn test_scroll_comment_to_cursor_accounts_for_wrap() {
+        // Single long line that wraps: "aaaaaaaaaa" (10 a's) with content_width=5
+        // Visual rows: row 0 = "aaaaa", row 1 = "aaaaa"
+        // cursor at byte 7 (in second visual row) with viewport=1 should scroll to row 1
+        let mut app = app_with_diff(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "aaaaaaaaaa".to_string(),
+            cursor: 7,
+            original: None,
+        };
+        app.scroll_comment_to_cursor(1, 5);
+        assert_eq!(app.comment_scroll, 1);
     }
 
     // ── Edit / delete notes ───────────────────────────────────────────────────
@@ -1003,13 +1133,13 @@ mod tests {
     fn test_context_run_visual_lines_short_run_shown_as_is() {
         // 3 context lines < FOLD_THRESHOLD — should count as 3, not 1
         let lines = make_lines(&[LineKind::Context; 3]);
-        assert_eq!(context_run_visual_lines(&lines), 3);
+        assert_eq!(context_run_visual_lines(&lines, 0), 3);
     }
 
     #[test]
     fn test_context_run_visual_lines_long_run_folds_to_one() {
         let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
-        assert_eq!(context_run_visual_lines(&lines), 1);
+        assert_eq!(context_run_visual_lines(&lines, 0), 1);
     }
 
     #[test]
@@ -1022,7 +1152,7 @@ mod tests {
         kinds.push(LineKind::Added);
         let lines = make_lines(&kinds);
         // visual: 1 + 2 + 1 + 1(fold) + 1 = 6
-        assert_eq!(context_run_visual_lines(&lines), 6);
+        assert_eq!(context_run_visual_lines(&lines, 0), 6);
     }
 
     #[test]
@@ -1035,6 +1165,65 @@ mod tests {
     fn test_hunk_has_foldable_context_true_at_threshold() {
         let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
         assert!(hunk_has_foldable_context(&lines));
+    }
+
+    // ── visual_rows_for_diff_line ─────────────────────────────────────────────
+
+    #[test]
+    fn test_visual_rows_zero_width_returns_one() {
+        assert_eq!(visual_rows_for_diff_line("long line content", 0), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_short_line_fits_in_one_row() {
+        // gutter=6, content=10 → total=16 ≤ panel_width=80 → 1 row
+        assert_eq!(visual_rows_for_diff_line("0123456789", 80), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_exactly_fills_panel() {
+        // total = 6 + 74 = 80 chars, panel=80 → 1 row
+        let content = "x".repeat(74);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_one_char_over_wraps_to_two() {
+        // total = 6 + 75 = 81 chars, panel=80 → 2 rows
+        let content = "x".repeat(75);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 2);
+    }
+
+    #[test]
+    fn test_visual_rows_double_panel_width_gives_two_rows() {
+        // total = 6 + 154 = 160 chars, panel=80 → 2 rows
+        let content = "x".repeat(154);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 2);
+    }
+
+    #[test]
+    fn test_visual_rows_context_line_accounting_in_scroll() {
+        // Verify diff_content_lines accounts for wrap when diff_view_content_width is set.
+        // Three hunks, each with one added line of 75 chars (would wrap at panel_width=80).
+        use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+        let mut app = app_with_diff(0);
+        let long_content = "x".repeat(75); // wraps to 2 visual rows at panel_width=80
+        app.current_diff = Some(DiffFile {
+            file: make_files(1).remove(0),
+            hunks: vec![Hunk {
+                header: "@@ -1,1 +1,1 @@".to_string(),
+                old_start: 1, new_start: 1,
+                lines: vec![DiffLine {
+                    old_lineno: None, new_lineno: Some(1),
+                    kind: LineKind::Added, content: long_content,
+                }],
+            }],
+        });
+        // Without wrap accounting: 1 hunk = 1(header) + 1(line) + 0(notes) + 1(blank) = 3
+        assert_eq!(app.diff_content_lines(), 3);
+        // With wrap accounting: 1(header) + 2(visual rows) + 0 + 1 = 4
+        app.diff_view_content_width = 80;
+        assert_eq!(app.diff_content_lines(), 4);
     }
 
     #[test]
@@ -1100,6 +1289,77 @@ mod tests {
         assert_eq!(app.selected_note, 0);
     }
 
+    // ── Notes panel scrolling ────────────────────────────────────────────────
+
+    fn app_with_many_notes(n: usize) -> App {
+        let mut app = app_with_diff(3);
+        for hunk_idx in 0..n.min(3) {
+            app.selected_hunk = hunk_idx;
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0, original: None };
+            app.submit_comment();
+        }
+        app.selected_note = 0;
+        app
+    }
+
+    #[test]
+    fn test_scroll_notes_no_op_when_selected_visible() {
+        let mut app = app_with_many_notes(2);
+        app.selected_note = 0;
+        app.scroll_notes_to_selected(8); // both notes fit in 8 rows (3 rows each)
+        assert_eq!(app.notes_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_notes_scrolls_down_when_below_viewport() {
+        let mut app = app_with_many_notes(3);
+        // 3 collapsed notes = 9 visual rows; viewport=6 can show 2 notes
+        app.selected_note = 2; // note 2 starts at row 6
+        app.scroll_notes_to_selected(6);
+        // note 2 ends at row 9, viewport=6 → scroll = 9-6 = 3
+        assert_eq!(app.notes_scroll, 3);
+    }
+
+    #[test]
+    fn test_scroll_notes_scrolls_up_when_above_viewport() {
+        let mut app = app_with_many_notes(3);
+        app.notes_scroll = 6; // viewport shows rows 6+
+        app.selected_note = 0; // note 0 starts at row 0
+        app.scroll_notes_to_selected(6);
+        assert_eq!(app.notes_scroll, 0);
+    }
+
+    #[test]
+    fn test_note_visual_rows_collapsed() {
+        let note = FeedbackNote {
+            file: std::path::PathBuf::from("src/foo.rs"),
+            hunk_header: "@@ -1,1 +1,1 @@".to_string(),
+            hunk_content: String::new(),
+            note: "single line".to_string(),
+        };
+        assert_eq!(note_visual_rows(&note, false), 3);
+    }
+
+    #[test]
+    fn test_note_visual_rows_expanded_multiline() {
+        let note = FeedbackNote {
+            file: std::path::PathBuf::from("src/foo.rs"),
+            hunk_header: "@@ -1,1 +1,1 @@".to_string(),
+            hunk_content: String::new(),
+            note: "line one\nline two\nline three".to_string(),
+        };
+        // header(1) + 3 lines + blank(1) = 5
+        assert_eq!(note_visual_rows(&note, true), 5);
+    }
+
+    #[test]
+    fn test_delete_selected_note_resets_scroll() {
+        let mut app = app_with_many_notes(2);
+        app.notes_scroll = 3;
+        app.delete_selected_note();
+        assert_eq!(app.notes_scroll, 0);
+    }
+
     #[test]
     fn test_toggle_note_expand() {
         let mut app = app_with_two_file_notes();
@@ -1153,5 +1413,79 @@ mod tests {
         let mut app = app_with_diff(1);
         app.delete_selected_note(); // should not panic
         assert!(app.notes.is_empty());
+    }
+
+    // ── selected_range ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_selected_range_forward() {
+        assert_eq!(selected_range(8, Some(3)), Some((3, 8)));
+    }
+
+    #[test]
+    fn test_selected_range_backward() {
+        assert_eq!(selected_range(3, Some(8)), Some((3, 8)));
+    }
+
+    #[test]
+    fn test_selected_range_no_anchor() {
+        assert_eq!(selected_range(5, None), None);
+    }
+
+    #[test]
+    fn test_selected_range_empty_when_cursor_equals_anchor() {
+        assert_eq!(selected_range(5, Some(5)), None);
+    }
+
+    // ── delete_selection ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_delete_selection_forward_range() {
+        // "hello world", delete bytes 3..8 = "lo wo"
+        let (s, c) = delete_selection("hello world", 8, Some(3)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn test_delete_selection_backward_range() {
+        let (s, c) = delete_selection("hello world", 3, Some(8)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn test_delete_selection_no_anchor_returns_none() {
+        assert!(delete_selection("hello", 3, None).is_none());
+    }
+
+    #[test]
+    fn test_delete_selection_empty_range_returns_none() {
+        assert!(delete_selection("hello", 3, Some(3)).is_none());
+    }
+
+    #[test]
+    fn test_delete_selection_full_text() {
+        let (s, c) = delete_selection("hello", 5, Some(0)).unwrap();
+        assert_eq!(s, "");
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn test_delete_selection_across_newline() {
+        let input = "line1\nline2\nline3";
+        // delete the '\n' at byte 5
+        let (s, c) = delete_selection(input, 5, Some(6)).unwrap();
+        assert_eq!(s, "line1line2\nline3");
+        assert_eq!(c, 5);
+    }
+
+    #[test]
+    fn test_delete_selection_multiline_span() {
+        let input = "hello\nworld";
+        // delete bytes 3..8 = "lo\nwo"
+        let (s, c) = delete_selection(input, 8, Some(3)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
     }
 }
