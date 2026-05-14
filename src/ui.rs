@@ -136,7 +136,7 @@ fn run_event_loop<G: GitBackend>(
                             let viewport = terminal.size()
                                 .map(|r| r.height.saturating_sub(3) as usize)
                                 .unwrap_or(20);
-                            app.scroll_to_show_comment_input(viewport);
+                            app.scroll_to_show_comment_cursor(viewport);
                         }
                     }
                     KeyCode::Char(' ') => match app.focused_panel {
@@ -150,7 +150,7 @@ fn run_event_loop<G: GitBackend>(
                             let viewport = terminal.size()
                                 .map(|r| r.height.saturating_sub(3) as usize)
                                 .unwrap_or(20);
-                            app.scroll_to_show_comment_input(viewport);
+                            app.scroll_to_show_comment_cursor(viewport);
                         }
                         Panel::NotesView => {
                             jump_to_note(app, git);
@@ -187,6 +187,10 @@ fn run_event_loop<G: GitBackend>(
                     input.insert(cursor, '\n');
                     cursor += 1;
                     app.mode = Mode::Comment { hunk_idx, input, cursor, original };
+                    let viewport = terminal.size()
+                        .map(|r| r.height.saturating_sub(3) as usize)
+                        .unwrap_or(20);
+                    app.scroll_to_show_comment_cursor(viewport);
                 }
                 KeyCode::Left => {
                     cursor = cursor_prev(&input, cursor);
@@ -242,7 +246,7 @@ fn render(frame: &mut Frame, app: &App) {
 fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == Panel::FileList;
     let border_style = if focused {
-        Style::default().fg(Color::Blue)
+        Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -262,7 +266,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                 FileStatus::Renamed => Color::Cyan,
             };
             let base_style = if i == app.selected_file {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -296,7 +300,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
 fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == Panel::DiffView;
     let border_style = if focused {
-        Style::default().fg(Color::Blue)
+        Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -811,7 +815,7 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
     let para = Paragraph::new(Text::from(lines)).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue))
+            .border_style(Style::default().fg(Color::Cyan))
             .title(title),
     );
     frame.render_widget(para, area);
@@ -860,7 +864,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         },
     };
 
-    let style = Style::default().bg(Color::Blue).fg(Color::White);
+    let style = Style::default().bg(Color::DarkGray).fg(Color::White);
     let bar = Paragraph::new(text).style(style);
     frame.render_widget(bar, area);
 }

@@ -39,6 +39,16 @@ New code must be structured so it can be tested without a real terminal, real gi
 
 If you find yourself writing logic inside a function that shells out or renders to the terminal, stop and extract it.
 
+### Unsafe code
+
+Do not write `unsafe` Rust unless there is genuinely no safe alternative **and** a human has explicitly approved the decision in conversation. Before reaching for `unsafe`:
+
+1. Exhaust safe alternatives (trait objects, wrapper crates, restructuring).
+2. If no safe alternative exists, explain why to the user and get explicit sign-off before writing or committing the unsafe block.
+3. Add a `// SAFETY:` comment on every `unsafe {}` block explaining the invariants that make it sound.
+
+The only current approved use of `unsafe` in this codebase is in `main.rs` `attach_to_console()`: three `SetStdHandle` calls that redirect Windows standard handles to the attached console before crossterm touches `GetStdHandle`. This was approved 2026-05-13 after confirming no safe alternative exists — crossterm's `enable_raw_mode()` unconditionally calls `GetStdHandle(STD_INPUT_HANDLE)` internally with no public API to override it.
+
 ---
 
 ## Commit Style

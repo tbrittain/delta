@@ -244,17 +244,24 @@ impl App {
         Some((content_lines, note_count))
     }
 
-    /// After entering comment mode, scroll the diff view down if the comment
-    /// input would appear below the visible viewport.
-    pub fn scroll_to_show_comment_input(&mut self, viewport_height: usize) {
+    /// Scroll the diff view so the comment cursor line stays visible.
+    ///
+    /// Reads the current cursor position from `self.mode` so it works both on
+    /// first entry (cursor line 0) and as the comment grows (cursor on line N).
+    /// Only scrolls down — never jumps up — so it is safe to call on every keypress.
+    pub fn scroll_to_show_comment_cursor(&mut self, viewport_height: usize) {
+        let cursor_line = match &self.mode {
+            Mode::Comment { input, cursor, .. } => input[..*cursor].matches('\n').count(),
+            _ => 0,
+        };
         let Some((content_lines, note_count)) = self.comment_input_position_data() else {
             return;
         };
         let hunk_start = self.hunk_scroll_offset(self.selected_hunk);
-        // Comment input appears after: header (1) + content + existing notes
-        let comment_row = hunk_start + 1 + content_lines + note_count;
-        // Scroll so comment_row is at least 1 row from the bottom of the viewport
-        let needed = (comment_row + 2).saturating_sub(viewport_height);
+        // Comment block starts after: hunk header (1) + diff content + existing notes.
+        // The cursor sits cursor_line rows below that start.
+        let cursor_row = hunk_start + 1 + content_lines + note_count + cursor_line;
+        let needed = (cursor_row + 2).saturating_sub(viewport_height);
         if self.diff_scroll < needed {
             self.diff_scroll = needed;
         }
@@ -785,29 +792,43 @@ mod tests {
     // ── Comment input viewport scrolling ─────────────────────────────────────
 
     #[test]
-    fn test_scroll_to_show_comment_input_adjusts_when_below_viewport() {
+    fn test_scroll_to_show_comment_cursor_adjusts_when_below_viewport() {
         let mut app = app_with_diff(3);
         // Select hunk 2 (starts at offset 10: two hunks of 5 lines each)
         app.selected_hunk = 2;
-        // Comment input appears at: hunk_start(2)=10, +1 header +3 lines +0 notes = row 14
-        // With a viewport of 10, we need scroll >= 14+2-10 = 6
-        app.scroll_to_show_comment_input(10);
+        // Comment starts at: hunk_start(2)=10 +1 header +3 lines +0 notes = row 14.
+        // cursor_line=0 (Normal mode fallback), so cursor_row=14.
+        // viewport 10 → needed = (14+2)-10 = 6
+        app.scroll_to_show_comment_cursor(10);
         assert!(app.diff_scroll >= 6, "scroll should bring comment input into view");
     }
 
     #[test]
-    fn test_scroll_to_show_comment_input_no_op_when_already_visible() {
+    fn test_scroll_to_show_comment_cursor_follows_multiline_input() {
+        let mut app = app_with_diff(3);
+        app.selected_hunk = 2;
+        // Put the cursor on line 2 of the comment (two newlines before it).
+        let input = "line one\nline two\nline three".to_string();
+        let cursor = input.len();
+        app.mode = Mode::Comment { hunk_idx: 2, input, cursor, original: None };
+        // comment_start = 10+1+3+0 = 14; cursor_line=2; cursor_row=16
+        // viewport 10 → needed = (16+2)-10 = 8
+        app.scroll_to_show_comment_cursor(10);
+        assert!(app.diff_scroll >= 8, "scroll should follow cursor to line 3");
+    }
+
+    #[test]
+    fn test_scroll_to_show_comment_cursor_no_op_when_already_visible() {
         let mut app = app_with_diff(1);
-        // Hunk 0: comment appears at row 4 (1 header + 3 lines)
-        // With viewport of 20, it's already visible — scroll should stay 0
-        app.scroll_to_show_comment_input(20);
+        // Hunk 0: comment starts at row 4. With viewport 20, already visible.
+        app.scroll_to_show_comment_cursor(20);
         assert_eq!(app.diff_scroll, 0);
     }
 
     #[test]
-    fn test_scroll_to_show_comment_input_no_op_without_diff() {
+    fn test_scroll_to_show_comment_cursor_no_op_without_diff() {
         let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
-        app.scroll_to_show_comment_input(20); // should not panic
+        app.scroll_to_show_comment_cursor(20); // should not panic
         assert_eq!(app.diff_scroll, 0);
     }
 

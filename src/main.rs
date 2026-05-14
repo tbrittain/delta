@@ -70,7 +70,17 @@ fn main() -> Result<()> {
 
     // --spawned means we were deliberately launched in a new window by a parent
     // delta process — always run the TUI regardless of TTY state.
-    if args.spawned || std::io::stdin().is_terminal() {
+    if args.spawned {
+        // On Windows the parent spawns us with CREATE_NEW_CONSOLE, which creates a
+        // real console window but leaves our stdin/stdout/stderr pointing at the
+        // parent's pipe handles (set via STARTF_USESTDHANDLES).  Re-point them at
+        // the attached console before crossterm touches GetStdHandle.
+        #[cfg(target_os = "windows")]
+        attach_to_console()?;
+        return run_tui(&args);
+    }
+
+    if std::io::stdin().is_terminal() {
         return run_tui(&args);
     }
 
@@ -157,51 +167,68 @@ fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
     return spawn_and_wait_unix(exe, args);
 }
 
-/// Windows: use `cmd.exe /c start "" /wait` to open delta in a new console window.
+/// Windows: spawn delta directly in a new console window using CREATE_NEW_CONSOLE.
 ///
-/// `start` creates the child process with fresh console-attached stdin/stdout/stderr
-/// rather than inheriting the parent's pipe handles. This matters because crossterm
-/// writes to io::stdout(), so if stdout were the Claude Code pipe the TUI would
-/// render into the conversation instead of the console window.
-///
-/// We use raw_arg to append the command string without Rust's \" escaping, which
-/// conflicts with cmd.exe's "" quoting model and was the source of the earlier
-/// "Windows cannot find '\\'" error. We also strip any \\?\ extended-length path
-/// prefix from current_exe() because the start builtin cannot resolve those paths.
+/// CREATE_NEW_CONSOLE allocates a fresh console for the child process and shows its
+/// window.  The child's stdin/stdout/stderr still point at our pipe handles via
+/// STARTF_USESTDHANDLES, but `attach_to_console` (called inside the spawned child
+/// before any crossterm I/O) re-points them at the real console screen buffers.
 #[cfg(target_os = "windows")]
 fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
     use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    // current_exe() can return a \\?\ (extended-length) prefixed path on Windows.
-    // Strip it — the start builtin resolves paths through the shell, not Win32 directly.
-    let exe_str = exe.to_string_lossy();
-    let exe_clean = exe_str.strip_prefix(r"\\?\").unwrap_or(&exe_str);
-
-    // Wrap a token in cmd.exe double-quote style (no backslash escaping needed).
-    let quote = |s: &str| -> String {
-        if s.contains(' ') || s.is_empty() {
-            format!("\"{}\"", s)
-        } else {
-            s.to_string()
-        }
-    };
-
-    // Build the raw cmd.exe command string. We use raw_arg so Rust does not apply
-    // its own \" escaping on top of our "" quoting — the two models conflict.
-    let mut raw = format!("/c start \"\" /wait {}", quote(exe_clean));
-    for arg in args {
-        raw.push(' ');
-        raw.push_str(&quote(arg));
-    }
-
-    Command::new("cmd.exe")
-        .raw_arg(&raw)
-        .creation_flags(CREATE_NO_WINDOW)
+    Command::new(exe)
+        .args(args)
+        .creation_flags(CREATE_NEW_CONSOLE)
         .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to open console window: {e}"))?
         .wait()?;
+
+    Ok(())
+}
+
+/// Re-point the process's standard handles at the attached console screen buffers.
+///
+/// When spawned with CREATE_NEW_CONSOLE the child process has a real console window,
+/// but its Win32 standard handles (STD_INPUT/OUTPUT/ERROR_HANDLE) still refer to the
+/// parent's pipe handles passed through STARTF_USESTDHANDLES.  Opening CONIN$/CONOUT$
+/// bypasses the file-descriptor layer and gives us direct handles to the console
+/// buffers; calling SetStdHandle makes every subsequent GetStdHandle call (by
+/// crossterm, ratatui, and Rust's io::std*()) return these console handles instead.
+#[cfg(target_os = "windows")]
+fn attach_to_console() -> Result<()> {
+    use std::os::windows::io::IntoRawHandle;
+
+    const STD_INPUT_HANDLE: u32 = (-10i32) as u32;
+    const STD_OUTPUT_HANDLE: u32 = (-11i32) as u32;
+    const STD_ERROR_HANDLE: u32 = (-12i32) as u32;
+
+    unsafe extern "system" {
+        fn SetStdHandle(nStdHandle: u32, hHandle: *mut std::ffi::c_void) -> i32;
+    }
+
+    let conin = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true) // write access required for SetConsoleMode on the input handle
+        .open("CONIN$")
+        .map_err(|e| anyhow::anyhow!("failed to open CONIN$ (no console attached?): {e}"))?;
+
+    let conout = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("CONOUT$")
+        .map_err(|e| anyhow::anyhow!("failed to open CONOUT$ (no console attached?): {e}"))?;
+
+    let conout_raw = conout.into_raw_handle();
+    // SAFETY: called before any threads use stdio; conin/conout are valid, open
+    // console handles with the correct access flags; handles live for the process
+    // lifetime (intentionally not closed — they're now owned as standard handles).
+    unsafe {
+        SetStdHandle(STD_INPUT_HANDLE, conin.into_raw_handle());
+        SetStdHandle(STD_OUTPUT_HANDLE, conout_raw);
+        SetStdHandle(STD_ERROR_HANDLE, conout_raw);
+    }
 
     Ok(())
 }
