@@ -59,6 +59,9 @@ pub struct App {
     pub expanded_notes: HashSet<usize>,
     /// Scroll offset within the comment popup (logical lines).
     pub comment_scroll: usize,
+    /// Byte offset of the selection anchor; `None` means no active selection.
+    /// The selected range is `min(cursor, anchor)..max(cursor, anchor)`.
+    pub comment_anchor: Option<usize>,
 }
 
 impl App {
@@ -80,6 +83,7 @@ impl App {
             selected_note: 0,
             expanded_notes: HashSet::new(),
             comment_scroll: 0,
+            comment_anchor: None,
         }
     }
 
@@ -287,6 +291,7 @@ impl App {
             let cursor = original.note.len();
             let input = original.note.clone();
             self.comment_scroll = 0;
+            self.comment_anchor = None;
             self.mode = Mode::Comment {
                 hunk_idx: self.selected_hunk,
                 input,
@@ -302,6 +307,7 @@ impl App {
                 self.edit_note_for_current_hunk();
             } else {
                 self.comment_scroll = 0;
+                self.comment_anchor = None;
                 self.mode = Mode::Comment {
                     hunk_idx: self.selected_hunk,
                     input: String::new(),
@@ -343,6 +349,7 @@ impl App {
             }
         }
         self.comment_scroll = 0;
+        self.comment_anchor = None;
         self.mode = Mode::Normal;
     }
 
@@ -354,6 +361,7 @@ impl App {
             }
         }
         self.comment_scroll = 0;
+        self.comment_anchor = None;
         self.mode = Mode::Normal;
     }
 }
@@ -390,6 +398,28 @@ fn hunk_has_foldable_context(lines: &[DiffLine]) -> bool {
         }
     }
     false
+}
+
+/// Returns `Some((start, end))` where `start < end` if there is a non-empty selection,
+/// `None` otherwise.
+pub(crate) fn selected_range(cursor: usize, anchor: Option<usize>) -> Option<(usize, usize)> {
+    let a = anchor?;
+    let start = cursor.min(a);
+    let end = cursor.max(a);
+    if start < end { Some((start, end)) } else { None }
+}
+
+/// Delete the selected byte range from `input` and return `(new_input, new_cursor)`.
+/// Returns `None` if there is no non-empty selection.
+pub(crate) fn delete_selection(
+    input: &str,
+    cursor: usize,
+    anchor: Option<usize>,
+) -> Option<(String, usize)> {
+    let (start, end) = selected_range(cursor, anchor)?;
+    let mut new_input = input.to_string();
+    new_input.drain(start..end);
+    Some((new_input, start))
 }
 
 #[cfg(test)]
@@ -1130,5 +1160,79 @@ mod tests {
         let mut app = app_with_diff(1);
         app.delete_selected_note(); // should not panic
         assert!(app.notes.is_empty());
+    }
+
+    // ── selected_range ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_selected_range_forward() {
+        assert_eq!(selected_range(8, Some(3)), Some((3, 8)));
+    }
+
+    #[test]
+    fn test_selected_range_backward() {
+        assert_eq!(selected_range(3, Some(8)), Some((3, 8)));
+    }
+
+    #[test]
+    fn test_selected_range_no_anchor() {
+        assert_eq!(selected_range(5, None), None);
+    }
+
+    #[test]
+    fn test_selected_range_empty_when_cursor_equals_anchor() {
+        assert_eq!(selected_range(5, Some(5)), None);
+    }
+
+    // ── delete_selection ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_delete_selection_forward_range() {
+        // "hello world", delete bytes 3..8 = "lo wo"
+        let (s, c) = delete_selection("hello world", 8, Some(3)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn test_delete_selection_backward_range() {
+        let (s, c) = delete_selection("hello world", 3, Some(8)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn test_delete_selection_no_anchor_returns_none() {
+        assert!(delete_selection("hello", 3, None).is_none());
+    }
+
+    #[test]
+    fn test_delete_selection_empty_range_returns_none() {
+        assert!(delete_selection("hello", 3, Some(3)).is_none());
+    }
+
+    #[test]
+    fn test_delete_selection_full_text() {
+        let (s, c) = delete_selection("hello", 5, Some(0)).unwrap();
+        assert_eq!(s, "");
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn test_delete_selection_across_newline() {
+        let input = "line1\nline2\nline3";
+        // delete the '\n' at byte 5
+        let (s, c) = delete_selection(input, 5, Some(6)).unwrap();
+        assert_eq!(s, "line1line2\nline3");
+        assert_eq!(c, 5);
+    }
+
+    #[test]
+    fn test_delete_selection_multiline_span() {
+        let input = "hello\nworld";
+        // delete bytes 3..8 = "lo\nwo"
+        let (s, c) = delete_selection(input, 8, Some(3)).unwrap();
+        assert_eq!(s, "helrld");
+        assert_eq!(c, 3);
     }
 }
