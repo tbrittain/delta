@@ -2,11 +2,13 @@
 
 ## How it works
 
-The right panel shows the unified diff for the currently selected file. Lines are color-coded:
+The right panel shows the unified diff for the currently selected file. Lines are color-coded by change type using background color:
 
-- **Green** (`+`) — added lines
-- **Red** (`-`) — removed lines
-- **Gray** (` `) — context lines (unchanged)
+- **Green background** (`+`) — added lines
+- **Red background** (`-`) — removed lines
+- **No background** (` `) — context lines (unchanged)
+
+Language syntax is highlighted using the `syntect` crate (base16-ocean.dark theme, Sublime Text grammars). The language is detected from the file extension; unknown extensions fall back to plain text. Syntax foreground colors are layered on top of the change-type background so both signals are visible simultaneously.
 
 Line numbers appear in dark gray to the left of each line, showing the new file line number for added/context lines and the old file line number for removed lines.
 
@@ -59,18 +61,6 @@ The diff is inline (unified diff style). Some reviewers find side-by-side easier
 - Split view would divide the diff panel: old content left, new content right
 
 **Priority:** Post-MVP. Non-trivial — requires significant layout and rendering changes.
-
----
-
-### No syntax highlighting
-
-Diff lines are colored by change type (green/red/gray) but not by language syntax. Keywords, strings, and identifiers all render in the same flat color, making dense code harder to scan.
-
-**Possible directions:**
-- `syntect` crate (Sublime Text grammars, pure Rust) for token-level highlighting layered on top of change-type color; detect language from file extension and fall back gracefully for unknown types
-- `tree-sitter` if syntax-aware features (symbol navigation, structural selection) are added later — more powerful but a heavier dependency than syntect
-
-**Priority:** Post-MVP. Meaningful readability improvement, not blocking core workflow.
 
 ---
 

@@ -18,6 +18,7 @@ use ratatui::{
 use crate::app::{App, FeedbackNote, Mode, Panel, FOLD_THRESHOLD};
 use crate::diff::{ChangedFile, FileStatus, LineKind};
 use crate::git::GitBackend;
+use crate::highlight::HighlightedSpan;
 
 pub fn run<G: GitBackend>(
     files: Vec<ChangedFile>,
@@ -58,6 +59,7 @@ fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
         match &result { Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})") }
     );
     app.current_diff = result.ok().map(|raw| crate::diff::parse_diff(&raw, file));
+    app.current_highlights = app.current_diff.as_ref().map(|d| app.highlighter.highlight_diff(d));
     log::debug!(
         "[ui] load_current_file: current_diff={}",
         match &app.current_diff {
@@ -290,6 +292,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_style(border_style)
             .border_type(border_type)
+            .style(Style::default().bg(app.highlighter.panel_bg))
             .title(title),
     );
 
@@ -328,6 +331,7 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(border_style)
                 .border_type(border_type)
+                .style(Style::default().bg(app.highlighter.panel_bg))
                 .title(title),
         )
         .scroll((app.diff_scroll as u16, 0))
@@ -352,11 +356,15 @@ fn cursor_next(s: &str, cursor: usize) -> usize {
     pos
 }
 
-fn push_diff_line(dl: &crate::diff::DiffLine, out: &mut Vec<Line<'static>>) {
-    let (prefix, style) = match dl.kind {
-        LineKind::Added => ("+", Style::default().fg(Color::Green)),
-        LineKind::Removed => ("-", Style::default().fg(Color::Red)),
-        LineKind::Context => (" ", Style::default().fg(Color::Gray)),
+fn push_diff_line(
+    dl: &crate::diff::DiffLine,
+    highlights: Option<&[HighlightedSpan]>,
+    out: &mut Vec<Line<'static>>,
+) {
+    let (prefix, bg) = match dl.kind {
+        LineKind::Added => ("+", Some(Color::Rgb(0, 60, 0))),
+        LineKind::Removed => ("-", Some(Color::Rgb(70, 0, 0))),
+        LineKind::Context => (" ", None),
     };
     let lineno = match dl.kind {
         LineKind::Removed => dl.old_lineno,
@@ -366,15 +374,50 @@ fn push_diff_line(dl: &crate::diff::DiffLine, out: &mut Vec<Line<'static>>) {
         Some(n) => format!("{:>4}", n),
         None => "    ".to_string(),
     };
-    out.push(Line::from(vec![
-        Span::styled(lineno_str, Style::default().fg(Color::DarkGray)),
-        Span::styled(" ", Style::default().fg(Color::DarkGray)),
-        Span::styled(prefix, style),
-        Span::styled(dl.content.clone(), style),
-    ]));
+
+    let gutter_style = match bg {
+        Some(b) => Style::default().fg(Color::DarkGray).bg(b),
+        None => Style::default().fg(Color::DarkGray),
+    };
+
+    let mut spans = vec![
+        Span::styled(lineno_str, gutter_style),
+        Span::styled(" ", gutter_style),
+        Span::styled(prefix, gutter_style),
+    ];
+
+    match highlights {
+        Some(hl) if !hl.is_empty() => {
+            for token in hl {
+                let style = match bg {
+                    Some(b) => Style::default().fg(token.fg).bg(b),
+                    None => Style::default().fg(token.fg),
+                };
+                spans.push(Span::styled(token.content.clone(), style));
+            }
+        }
+        _ => {
+            let fallback_fg = match dl.kind {
+                LineKind::Added => Color::Green,
+                LineKind::Removed => Color::Red,
+                LineKind::Context => Color::Gray,
+            };
+            let style = match bg {
+                Some(b) => Style::default().fg(fallback_fg).bg(b),
+                None => Style::default().fg(fallback_fg),
+            };
+            spans.push(Span::styled(dl.content.clone(), style));
+        }
+    }
+
+    out.push(Line::from(spans));
 }
 
-fn push_diff_lines_folded(diff_lines: &[crate::diff::DiffLine], out: &mut Vec<Line<'static>>) {
+fn push_diff_lines_folded(
+    diff_lines: &[crate::diff::DiffLine],
+    line_highlights: Option<&[Vec<HighlightedSpan>]>,
+    out: &mut Vec<Line<'static>>,
+) {
     let fold_style = Style::default().fg(Color::DarkGray);
     let mut ctx_start = 0;
     let mut i = 0;
@@ -391,11 +434,13 @@ fn push_diff_lines_folded(diff_lines: &[crate::diff::DiffLine], out: &mut Vec<Li
                 )));
             } else {
                 for j in ctx_start..i {
-                    push_diff_line(&diff_lines[j], out);
+                    let hl = line_highlights.and_then(|h| h.get(j)).map(|v| v.as_slice());
+                    push_diff_line(&diff_lines[j], hl, out);
                 }
             }
             if i < diff_lines.len() {
-                push_diff_line(&diff_lines[i], out);
+                let hl = line_highlights.and_then(|h| h.get(i)).map(|v| v.as_slice());
+                push_diff_line(&diff_lines[i], hl, out);
             }
             ctx_start = i + 1;
         }
@@ -449,12 +494,15 @@ pub(crate) fn build_diff_text(app: &App) -> Text<'static> {
             ]));
         }
 
+        let hunk_hl = app.current_highlights.as_ref().and_then(|h| h.get(hunk_idx));
+
         if app.expanded_hunks.contains(&hunk_idx) {
-            for diff_line in &hunk.lines {
-                push_diff_line(diff_line, &mut lines);
+            for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
+                let hl = hunk_hl.and_then(|h| h.get(line_idx)).map(|v| v.as_slice());
+                push_diff_line(diff_line, hl, &mut lines);
             }
         } else {
-            push_diff_lines_folded(&hunk.lines, &mut lines);
+            push_diff_lines_folded(&hunk.lines, hunk_hl.map(|h| h.as_slice()), &mut lines);
         }
 
         for note in &app.notes {
