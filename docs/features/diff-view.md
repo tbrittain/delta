@@ -71,3 +71,25 @@ Diff lines are colored by change type (green/red/gray) but not by language synta
 - Detect language from file extension; fall back gracefully for unknown types
 
 **Priority:** Post-MVP. Meaningful readability improvement, not blocking core workflow.
+
+---
+
+### No word-level diff highlighting
+
+Lines are highlighted by change type but not at the word or token level. On a modified line, the entire line is red or green; the specific words that changed are not called out.
+
+**Possible directions:**
+- `similar` crate (pure Rust) for word-level diff between the old and new version of each changed line, rendered as intra-line highlights
+
+**Priority:** Post-MVP. Complements syntax highlighting; best implemented alongside or after it.
+
+---
+
+### No line-wrap toggle
+
+The diff view always uses soft word wrap (`Wrap { trim: false }`). There is no way to disable wrapping and scroll horizontally instead, which some users prefer for wide diffs.
+
+**Possible directions:**
+- `w` key toggles between soft-wrap (current) and no-wrap + horizontal scroll (`←`/`→`)
+
+**Priority:** Post-MVP. Soft wrap is a reasonable default; toggle adds flexibility without breaking anything.

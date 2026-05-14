@@ -66,6 +66,28 @@ All navigation is keyboard-only. Mouse clicks, scroll wheel, and text selection 
 
 ---
 
+### No version indicator
+
+The currently installed version is not shown anywhere in the TUI. Users must run `delta --version` or check `Cargo.toml` to find it.
+
+**Possible directions:**
+- Show `v0.x.y` in the status bar or a panel title corner
+
+**Priority:** Low. Minor convenience; easy to add.
+
+---
+
+### File list clips long paths
+
+File paths longer than the file list panel width (32 chars) are clipped with no way to see the full path.
+
+**Possible directions:**
+- Horizontal scroll in the file list (`←`/`→` when file list is focused)
+
+**Priority:** Low. Only affects repos with deeply nested paths.
+
+---
+
 ## In-app help
 
 No `?` keybind or help view exists. Users must consult the README or feature docs externally.
