@@ -44,6 +44,8 @@ pub struct App {
     pub selected_file: usize,
     pub focused_panel: Panel,
     pub current_diff: Option<DiffFile>,
+    pub current_highlights: Option<crate::highlight::DiffHighlights>,
+    pub highlighter: crate::highlight::SyntaxHighlighter,
     pub diff_scroll: usize,
     pub selected_hunk: usize,
     pub notes: Vec<FeedbackNote>,
@@ -66,6 +68,8 @@ impl App {
             selected_file: 0,
             focused_panel: Panel::FileList,
             current_diff: None,
+            current_highlights: None,
+            highlighter: crate::highlight::SyntaxHighlighter::new(),
             diff_scroll: 0,
             selected_hunk: 0,
             notes: Vec::new(),
@@ -82,6 +86,7 @@ impl App {
             self.diff_scroll = 0;
             self.selected_hunk = 0;
             self.current_diff = None;
+            self.current_highlights = None;
             self.expanded_hunks.clear();
         }
     }
