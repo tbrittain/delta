@@ -33,7 +33,7 @@ Opens a terminal UI showing all files changed between `<from>` and `<to>` (defau
 
 ### Option 1 — Install script
 
-**Linux and macOS** (bash):
+**Linux** (bash):
 ```bash
 curl -sSf https://raw.githubusercontent.com/tbrittain/delta/main/install.sh | bash
 ```
@@ -57,7 +57,7 @@ Download the binary for your platform from the [Releases page](https://github.co
 | Linux x86_64 | `delta-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
 | Windows x86_64 | `delta-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
 
-> macOS and Linux ARM64 are not yet officially supported. Builds from source should work but are untested.
+> macOS and Linux ARM64 are not supported targets.
 
 ### Option 3 — Build from source
 
@@ -216,12 +216,26 @@ The following are code review notes from a human reviewer. Please address each i
 
 ---
 
-## What delta is not
+## Design
 
-- A text editor — diffs are read-only
+Delta does **one thing**: a human reviews AI-generated code and produces structured output to feed back to the agent. That is the entire scope.
+
+Every feature must be directly central to the review → structured-output → agent-feedback loop. Improvements to diff viewing, hunk navigation, comment input, and export format are in scope. Everything else — AI integrations, theme engines, commit tooling, ancillary utilities — is not.
+
+**What delta is:**
+- A terminal-first, local-first diff review tool
+- An orchestration layer between human reviewers and AI coding agents
+- Git-centric: operates on committed branch changes vs a base ref
+- Read-only: never modifies files
+
+**What delta is not:**
+- A text editor or merge tool
 - A replacement for GitHub/GitLab code review
-- A persistent review platform — feedback is ephemeral, tied to one session
-- A merge tool
+- A persistent review platform — feedback is ephemeral, scoped to one session
+- An AI-integrated tool — no built-in LLM calls, no provider integrations
+- A `git difftool` driver
+
+**Design principles:** local-first (no server, no accounts), terminal-first (optimized for tmux/SSH environments), ephemeral review state, git-centric.
 
 ---
 

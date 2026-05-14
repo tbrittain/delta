@@ -61,20 +61,20 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 
 ### Windows: diff view shows "No diff content"
 
-**Observed:** On Windows, files appear in the file list but the diff view shows "No diff content." even for files that have changes.
-
-**Suspected causes (not yet diagnosed):**
-- `git diff` output on Windows may use CRLF line endings in ways the parser doesn't handle (though Rust's `str::lines()` should strip them)
-- `git` not on PATH in the spawned console's environment
-- Path separator differences (`\` vs `/`) between what git reports and what delta expects
-- `core.autocrlf = true` causing git to show no textual differences
-
-**To investigate:** Run `git diff HEAD~ HEAD` directly in a Windows terminal and verify it produces output. If it does, the issue is in the parser or the environment delta inherits.
-
-**Priority:** High — blocking on Windows.
+**Resolved:** Fixed in `d2594c4` by passing `--no-ext-diff` to `git diff`, forcing git's built-in unified diff output regardless of any external difftool configured by the user. A configured external difftool produces output in a different format that the parser cannot handle. `--no-ext-diff` bypasses any such configuration and always uses git's built-in unified diff.
 
 ---
 
 ### No support for staged/unstaged changes
 
 By design. If this workflow is needed, commit the changes first or use `git stash` to create a commit-like snapshot.
+
+---
+
+### Future: in-process git via git2
+
+delta currently shells out to `git` for all operations. The `git2` crate (libgit2 bindings) would allow in-process git operations — faster, no PATH dependency, richer access to repository internals. Not needed until the subprocess approach becomes a bottleneck or limitation.
+
+### Note on deeper diff algorithms
+
+The `similar` crate covers the depth needed here — it provides multiple diff algorithms (LCS, patience, Myers) in pure Rust and is sufficient for word-level and line-level highlighting. No deeper diff engine is required.
