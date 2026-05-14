@@ -67,8 +67,8 @@ The diff is inline (unified diff style). Some reviewers find side-by-side easier
 Diff lines are colored by change type (green/red/gray) but not by language syntax. Keywords, strings, and identifiers all render in the same flat color, making dense code harder to scan.
 
 **Possible directions:**
-- `syntect` crate (Sublime Text grammars, pure Rust) for token-level highlighting layered on top of change-type color
-- Detect language from file extension; fall back gracefully for unknown types
+- `syntect` crate (Sublime Text grammars, pure Rust) for token-level highlighting layered on top of change-type color; detect language from file extension and fall back gracefully for unknown types
+- `tree-sitter` if syntax-aware features (symbol navigation, structural selection) are added later — more powerful but a heavier dependency than syntect
 
 **Priority:** Post-MVP. Meaningful readability improvement, not blocking core workflow.
 

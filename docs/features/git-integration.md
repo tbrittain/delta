@@ -68,3 +68,13 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 ### No support for staged/unstaged changes
 
 By design. If this workflow is needed, commit the changes first or use `git stash` to create a commit-like snapshot.
+
+---
+
+### Future: in-process git via git2
+
+delta currently shells out to `git` for all operations. The `git2` crate (libgit2 bindings) would allow in-process git operations — faster, no PATH dependency, richer access to repository internals. Not needed until the subprocess approach becomes a bottleneck or limitation.
+
+### Future: structural diffing via Difftastic
+
+Difftastic produces AST-aware diffs that ignore formatting noise and understand language structure. No stable machine-readable output format exists yet (as of 2025), so integration would require parsing ANSI output or an upstream contribution. Worth revisiting if Difftastic gains a structured output mode.
