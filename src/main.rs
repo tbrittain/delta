@@ -157,32 +157,48 @@ fn spawn_and_wait(exe: &PathBuf, args: &[String]) -> Result<()> {
     return spawn_and_wait_unix(exe, args);
 }
 
-/// Windows: use CREATE_NEW_CONSOLE to open delta in a new visible console window.
+/// Windows: use `cmd.exe /c start "" /wait` to open delta in a new console window.
 ///
-/// We pass --spawned so the child always runs the TUI regardless of its own
-/// is_terminal() result — this breaks the recursive-spawn loop that made
-/// CREATE_NEW_CONSOLE unusable before --spawned existed.
+/// `start` creates the child process with fresh console-attached stdin/stdout/stderr
+/// rather than inheriting the parent's pipe handles. This matters because crossterm
+/// writes to io::stdout(), so if stdout were the Claude Code pipe the TUI would
+/// render into the conversation instead of the console window.
 ///
-/// We avoid cmd.exe /c start entirely: Rust's Command escapes args with \"
-/// but cmd.exe only understands "" quoting, so the two conventions conflict
-/// and mangle the command line. CreateProcess with CREATE_NEW_CONSOLE is the
-/// correct Win32 primitive and requires no shell intermediary.
+/// We use raw_arg to append the command string without Rust's \" escaping, which
+/// conflicts with cmd.exe's "" quoting model and was the source of the earlier
+/// "Windows cannot find '\\'" error. We also strip any \\?\ extended-length path
+/// prefix from current_exe() because the start builtin cannot resolve those paths.
 #[cfg(target_os = "windows")]
 fn spawn_and_wait_windows(exe: &PathBuf, args: &[String]) -> Result<()> {
     use std::os::windows::process::CommandExt;
-    use std::process::Stdio;
 
-    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     // current_exe() can return a \\?\ (extended-length) prefixed path on Windows.
-    // Strip it so CreateProcess resolves the executable through the normal path.
+    // Strip it — the start builtin resolves paths through the shell, not Win32 directly.
     let exe_str = exe.to_string_lossy();
     let exe_clean = exe_str.strip_prefix(r"\\?\").unwrap_or(&exe_str);
 
-    Command::new(exe_clean)
-        .args(args)
-        .stdin(Stdio::null())
-        .creation_flags(CREATE_NEW_CONSOLE)
+    // Wrap a token in cmd.exe double-quote style (no backslash escaping needed).
+    let quote = |s: &str| -> String {
+        if s.contains(' ') || s.is_empty() {
+            format!("\"{}\"", s)
+        } else {
+            s.to_string()
+        }
+    };
+
+    // Build the raw cmd.exe command string. We use raw_arg so Rust does not apply
+    // its own \" escaping on top of our "" quoting — the two models conflict.
+    let mut raw = format!("/c start \"\" /wait {}", quote(exe_clean));
+    for arg in args {
+        raw.push(' ');
+        raw.push_str(&quote(arg));
+    }
+
+    Command::new("cmd.exe")
+        .raw_arg(&raw)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to open console window: {e}"))?
         .wait()?;

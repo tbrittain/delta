@@ -130,3 +130,5 @@ This document tracks implementation status. Check items off as they are complete
 - [ ] `similar` crate for inline word-level diff highlighting
 - [ ] Side-by-side diff view
 - [ ] Virtual hunk splitting for pure-addition large files (no context to fold)
+- [ ] Line wrap toggle in diff view: `w` key switches between soft-wrap (current) and no-wrap + horizontal scroll (`←`/`→`)
+- [ ] File list horizontal scroll: long paths are clipped by the panel width; allow horizontal scrolling so the full path is reachable
