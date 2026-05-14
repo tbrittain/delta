@@ -61,7 +61,7 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 
 ### Windows: diff view shows "No diff content"
 
-**Resolved:** Fixed in `d2594c4` by passing `--no-ext-diff` to `git diff`, forcing git's built-in unified diff output regardless of any external difftool configured by the user (`diff.tool`, `diff.external`, etc.). External difftool output is not in unified diff format and was silently producing no parseable content.
+**Resolved:** Fixed in `d2594c4` by passing `--no-ext-diff` to `git diff`, forcing git's built-in unified diff output regardless of any external difftool configured by the user. A configured external difftool produces output in a different format that the parser cannot handle. `--no-ext-diff` bypasses any such configuration and always uses git's built-in unified diff.
 
 ---
 
@@ -75,6 +75,6 @@ By design. If this workflow is needed, commit the changes first or use `git stas
 
 delta currently shells out to `git` for all operations. The `git2` crate (libgit2 bindings) would allow in-process git operations — faster, no PATH dependency, richer access to repository internals. Not needed until the subprocess approach becomes a bottleneck or limitation.
 
-### Future: structural diffing via Difftastic
+### Note on deeper diff algorithms
 
-Difftastic produces AST-aware diffs that ignore formatting noise and understand language structure. No stable machine-readable output format exists yet (as of 2025), so integration would require parsing ANSI output or an upstream contribution. Worth revisiting if Difftastic gains a structured output mode.
+The `similar` crate covers the depth needed here — it provides multiple diff algorithms (LCS, patience, Myers) in pure Rust and is sufficient for word-level and line-level highlighting. No deeper diff engine is required.
