@@ -136,7 +136,7 @@ pub(crate) fn build_diff_text(app: &App, note_max_chars: usize) -> Text<'static>
 #[cfg(test)]
 mod tests {
     use super::build_diff_text;
-    use crate::app::{App, Mode, Panel, FOLD_THRESHOLD};
+    use crate::app::{App, Mode};
     use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
     use std::path::PathBuf;
 

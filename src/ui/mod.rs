@@ -22,6 +22,7 @@ use ratatui::{
 
 use crate::app::{App, FeedbackNote, Mode, Panel, delete_selection, selected_range};
 use crate::diff::{ChangedFile, FileStatus};
+use crate::filetree::TreeItem;
 use crate::git::GitBackend;
 
 use cursor::{
@@ -141,8 +142,14 @@ fn run_event_loop<G: GitBackend>(
                     },
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
-                            load_current_file(app, git);
-                            app.focused_panel = Panel::DiffView;
+                            let is_dir = app.tree_items().get(app.file_tree_cursor)
+                                .map(|i| i.is_dir()).unwrap_or(false);
+                            if is_dir {
+                                app.toggle_dir_at_cursor();
+                            } else {
+                                load_current_file(app, git);
+                                app.focused_panel = Panel::DiffView;
+                            }
                         } else if app.focused_panel == Panel::NotesView {
                             jump_to_note(app, git);
                         }
@@ -151,9 +158,9 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char(']') => { if app.focused_panel == Panel::DiffView { app.next_hunk(); } }
                     KeyCode::Char('c') => { if app.focused_panel == Panel::DiffView { app.start_comment(); } }
                     KeyCode::Char(' ') => match app.focused_panel {
+                        Panel::FileList  => app.toggle_dir_at_cursor(),
                         Panel::DiffView  => app.toggle_hunk_fold(),
                         Panel::NotesView => { app.toggle_note_expand(); app.scroll_notes_to_selected(8); }
-                        _ => {}
                     },
                     KeyCode::Char('e') => match app.focused_panel {
                         Panel::DiffView  => { app.edit_note_for_current_hunk(); }
@@ -327,33 +334,45 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
-    let items: Vec<ListItem> = app.files.iter().enumerate().map(|(i, f)| {
-        let has_notes = app.notes.iter().any(|n| n.file == f.path);
-        let note_marker = if has_notes { " ●" } else { "" };
-        let status_color = match f.status {
-            FileStatus::Added    => Color::Green,
-            FileStatus::Modified => Color::Yellow,
-            FileStatus::Deleted  => Color::Red,
-            FileStatus::Renamed  => Color::Cyan,
-        };
-        let base_style = if i == app.selected_file {
-            Style::default().add_modifier(Modifier::REVERSED).add_modifier(Modifier::BOLD)
-        } else { Style::default() };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("[{}]", f.status.indicator()), base_style.fg(status_color)),
-            Span::styled(format!(" {}{}", f.path.display(), note_marker), base_style),
-        ]))
+    let tree = app.tree_items();
+    let items: Vec<ListItem> = tree.iter().map(|item| {
+        let indent = "  ".repeat(item.depth());
+        match item {
+            TreeItem::Dir { display_name, file_count, collapsed, has_notes, .. } => {
+                let arrow = if *collapsed { "▸" } else { "▾" };
+                let note_marker = if *has_notes { " ●" } else { "" };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{}{} ", indent, arrow), Style::default().fg(ACCENT)),
+                    Span::raw(format!("{} ({}){}", display_name, file_count, note_marker)),
+                ]))
+            }
+            TreeItem::File { file_idx, display_name, has_notes, .. } => {
+                let f = &app.files[*file_idx];
+                let note_marker = if *has_notes { " ●" } else { "" };
+                let status_color = match f.status {
+                    FileStatus::Added    => Color::Green,
+                    FileStatus::Modified => Color::Yellow,
+                    FileStatus::Deleted  => Color::Red,
+                    FileStatus::Renamed  => Color::Cyan,
+                };
+                ListItem::new(Line::from(vec![
+                    Span::raw(indent),
+                    Span::styled(format!("[{}]", f.status.indicator()), Style::default().fg(status_color)),
+                    Span::raw(format!(" {}{}", display_name, note_marker)),
+                ]))
+            }
+        }
     }).collect();
-    let list = List::new(items).block(
-        Block::default()
+    let list = List::new(items)
+        .block(Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
             .border_type(border_type)
             .style(Style::default().bg(app.highlighter.panel_bg))
-            .title(format!(" Files ({}) ", app.files.len())),
-    );
+            .title(format!(" Files ({}) ", app.files.len())))
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED).add_modifier(Modifier::BOLD));
     let mut state = ListState::default();
-    state.select(Some(app.selected_file));
+    state.select(Some(app.file_tree_cursor));
     frame.render_stateful_widget(list, area, &mut state);
 }
 
@@ -443,7 +462,9 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
 fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
     let Some(file_idx) = app.selected_note_file_idx() else { return };
     let target_header = app.notes[app.selected_note].hunk_header.clone();
+    app.expand_parents_of(file_idx);
     app.select_file(file_idx);
+    app.sync_tree_cursor_to_file();
     load_current_file(app, git);
     if let Some(hunk_idx) = app.current_diff.as_ref()
         .and_then(|d| d.hunks.iter().position(|h| h.header == target_header))
@@ -458,7 +479,7 @@ fn status_bar_text(app: &App) -> String {
     match app.mode {
         Mode::Comment { .. } => " Ctrl+S: submit   Ctrl+C/V/X: copy/paste/cut   Shift+arrows: select   Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
-            Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: files  Enter: open  q: quit".to_string(),
+            Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: items  Enter/Space: open/toggle  q: quit".to_string(),
             Panel::NotesView => " Tab/Shift+Tab: navigate  ↑↓: notes  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string(),
             Panel::DiffView  => {
                 let note_count = app.notes.len();
@@ -783,5 +804,72 @@ mod tests {
     #[test]
     fn test_notes_panel_hunk_header() {
         assert!(notes_panel_rendered(&app_with_note("note")).contains("@@"));
+    }
+
+    // ── File list / tree rendering ────────────────────────────────────────────
+
+    fn file_list_rendered(app: &App) -> String {
+        let backend = TestBackend::new(32, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_file_list(f, app, f.area())).unwrap();
+        terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect()
+    }
+
+    fn app_with_tree_files() -> App {
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/app.rs"),  status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Added },
+        ];
+        App::new(files, "main".to_string(), "HEAD".to_string())
+    }
+
+    #[test]
+    fn test_file_list_renders_dir_arrow() {
+        let app = app_with_tree_files();
+        let s = file_list_rendered(&app);
+        assert!(s.contains("▾"), "expanded dir should show ▾ arrow");
+    }
+
+    #[test]
+    fn test_file_list_renders_dir_name() {
+        let app = app_with_tree_files();
+        assert!(file_list_rendered(&app).contains("src/"));
+    }
+
+    #[test]
+    fn test_file_list_renders_file_with_status() {
+        let app = app_with_tree_files();
+        let s = file_list_rendered(&app);
+        assert!(s.contains("app.rs") && s.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_file_list_collapsed_dir_hides_files() {
+        let mut app = app_with_tree_files();
+        // Collapse src/ by toggling cursor at 0
+        app.file_tree_cursor = 0;
+        app.toggle_dir_at_cursor();
+        let s = file_list_rendered(&app);
+        assert!(s.contains("▸"), "collapsed dir should show ▸ arrow");
+        assert!(!s.contains("app.rs"), "files should be hidden when dir is collapsed");
+    }
+
+    #[test]
+    fn test_file_list_note_marker_on_file() {
+        let mut app = app_with_tree_files();
+        app.notes.push(FeedbackNote {
+            file: PathBuf::from("src/app.rs"),
+            hunk_header: "@@".to_string(),
+            hunk_content: String::new(),
+            note: "check this".to_string(),
+        });
+        assert!(file_list_rendered(&app).contains("●"));
+    }
+
+    #[test]
+    fn test_status_bar_file_list_mentions_toggle() {
+        let mut app = app_with_tree_files();
+        app.focused_panel = Panel::FileList;
+        assert!(status_bar_text(&app).contains("toggle"));
     }
 }

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::diff::{ChangedFile, DiffFile, DiffLine, LineKind};
+use crate::filetree::{TreeItem, build_tree};
 
 /// Context runs of this many lines or more are folded by default.
 pub(crate) const FOLD_THRESHOLD: usize = 6;
@@ -69,6 +70,10 @@ pub struct App {
     /// Updated by the event loop before each draw. Used to compute accurate visual row counts
     /// when wrap is enabled. Zero means "no wrap accounting" (treats every line as 1 row).
     pub diff_view_content_width: usize,
+    /// Directories the user has collapsed in the file tree. An empty set means all dirs are expanded.
+    pub collapsed_dirs: HashSet<PathBuf>,
+    /// Cursor position within the visible file tree (index into `tree_items()`).
+    pub file_tree_cursor: usize,
 }
 
 impl App {
@@ -93,6 +98,67 @@ impl App {
             comment_anchor: None,
             notes_scroll: 0,
             diff_view_content_width: 0,
+            collapsed_dirs: HashSet::new(),
+            file_tree_cursor: 0,
+        }
+    }
+
+    /// Build the visible file tree from the current files, notes, and collapsed state.
+    pub fn tree_items(&self) -> Vec<TreeItem> {
+        let noted: HashSet<PathBuf> = self.notes.iter().map(|n| n.file.clone()).collect();
+        build_tree(&self.files, &noted, &self.collapsed_dirs)
+    }
+
+    /// Toggle the collapse/expand state of the directory at the current tree cursor.
+    /// No-op when the cursor is on a file. Clamps `file_tree_cursor` after the tree changes.
+    pub fn toggle_dir_at_cursor(&mut self) {
+        let path_opt = self.tree_items().get(self.file_tree_cursor)
+            .and_then(|i| i.dir_path()).cloned();
+        if let Some(path) = path_opt {
+            if self.collapsed_dirs.contains(&path) {
+                self.collapsed_dirs.remove(&path);
+            } else {
+                self.collapsed_dirs.insert(path);
+            }
+            let new_len = self.tree_items().len();
+            if new_len > 0 {
+                self.file_tree_cursor = self.file_tree_cursor.min(new_len - 1);
+            }
+            self.sync_selected_file_from_cursor();
+        }
+    }
+
+    /// Remove all ancestor directories of `file_idx` from `collapsed_dirs` so the file is visible.
+    pub fn expand_parents_of(&mut self, file_idx: usize) {
+        let path = match self.files.get(file_idx) {
+            Some(f) => f.path.clone(),
+            None => return,
+        };
+        let mut current = path.as_path();
+        while let Some(parent) = current.parent() {
+            if parent == std::path::Path::new("") { break; }
+            self.collapsed_dirs.remove(parent);
+            current = parent;
+        }
+    }
+
+    /// Move `file_tree_cursor` to the position of `selected_file` in the visible tree.
+    /// Called after a jump-to-note so the file list cursor tracks the loaded file.
+    pub fn sync_tree_cursor_to_file(&mut self) {
+        let tree = self.tree_items();
+        if let Some(pos) = tree.iter().position(|i| i.file_idx() == Some(self.selected_file)) {
+            self.file_tree_cursor = pos;
+        }
+    }
+
+    /// Update `selected_file` from the tree item at `file_tree_cursor`.
+    /// No-op when the cursor is on a directory.
+    fn sync_selected_file_from_cursor(&mut self) {
+        let tree = self.tree_items();
+        if let Some(item) = tree.get(self.file_tree_cursor) {
+            if let Some(idx) = item.file_idx() {
+                self.selected_file = idx;
+            }
         }
     }
 
@@ -178,14 +244,16 @@ impl App {
     }
 
     pub fn file_list_up(&mut self) {
-        if self.selected_file > 0 {
-            self.select_file(self.selected_file - 1);
+        if self.file_tree_cursor > 0 {
+            self.file_tree_cursor -= 1;
+            self.sync_selected_file_from_cursor();
         }
     }
 
     pub fn file_list_down(&mut self) {
-        if self.selected_file + 1 < self.files.len() {
-            self.select_file(self.selected_file + 1);
+        if self.file_tree_cursor + 1 < self.tree_items().len() {
+            self.file_tree_cursor += 1;
+            self.sync_selected_file_from_cursor();
         }
     }
 
@@ -506,7 +574,7 @@ mod tests {
     fn make_files(n: usize) -> Vec<ChangedFile> {
         (0..n)
             .map(|i| ChangedFile {
-                path: PathBuf::from(format!("src/file_{}.rs", i)),
+                path: PathBuf::from(format!("file_{}.rs", i)),
                 status: FileStatus::Modified,
             })
             .collect()
@@ -556,24 +624,27 @@ mod tests {
 
     #[test]
     fn test_file_list_down_navigates() {
+        // make_files(3) → flat tree [file_0.rs, file_1.rs, file_2.rs]
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_down();
+        assert_eq!(app.file_tree_cursor, 1);
         assert_eq!(app.selected_file, 1);
     }
 
     #[test]
     fn test_file_list_down_clamps_at_end() {
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
-        app.selected_file = 2;
+        app.file_tree_cursor = 2;
         app.file_list_down();
-        assert_eq!(app.selected_file, 2);
+        assert_eq!(app.file_tree_cursor, 2);
     }
 
     #[test]
     fn test_file_list_up_navigates() {
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
-        app.selected_file = 2;
+        app.file_tree_cursor = 2;
         app.file_list_up();
+        assert_eq!(app.file_tree_cursor, 1);
         assert_eq!(app.selected_file, 1);
     }
 
@@ -581,7 +652,7 @@ mod tests {
     fn test_file_list_up_clamps_at_start() {
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_up();
-        assert_eq!(app.selected_file, 0);
+        assert_eq!(app.file_tree_cursor, 0);
     }
 
     #[test]
@@ -721,7 +792,7 @@ mod tests {
 
         assert_eq!(app.notes.len(), 1);
         assert_eq!(app.notes[0].note, "This looks wrong");
-        assert_eq!(app.notes[0].file, PathBuf::from("src/file_0.rs"));
+        assert_eq!(app.notes[0].file, PathBuf::from("file_0.rs"));
     }
 
     #[test]
@@ -1205,7 +1276,7 @@ mod tests {
     fn test_visual_rows_context_line_accounting_in_scroll() {
         // Verify diff_content_lines accounts for wrap when diff_view_content_width is set.
         // Three hunks, each with one added line of 75 chars (would wrap at panel_width=80).
-        use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+        use crate::diff::{DiffFile, DiffLine, Hunk, LineKind};
         let mut app = app_with_diff(0);
         let long_content = "x".repeat(75); // wraps to 2 visual rows at panel_width=80
         app.current_diff = Some(DiffFile {
@@ -1487,5 +1558,117 @@ mod tests {
         let (s, c) = delete_selection(input, 8, Some(3)).unwrap();
         assert_eq!(s, "helrld");
         assert_eq!(c, 3);
+    }
+
+    // ── File tree ──────────────────────────────────────────────────────────────
+
+    fn dir_files() -> Vec<ChangedFile> {
+        vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ]
+    }
+
+    #[test]
+    fn test_tree_items_flat_list() {
+        let app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        let tree = app.tree_items();
+        assert_eq!(tree.len(), 2);
+        assert!(tree.iter().all(|i| i.file_idx().is_some()));
+    }
+
+    #[test]
+    fn test_tree_items_with_dir() {
+        let app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        let tree = app.tree_items();
+        // Dir("src/") + 2 files = 3 items
+        assert_eq!(tree.len(), 3);
+        assert!(tree[0].is_dir());
+    }
+
+    #[test]
+    fn test_toggle_dir_collapses_tree() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.tree_items().len(), 3);
+        app.file_tree_cursor = 0; // on Dir("src/")
+        app.toggle_dir_at_cursor();
+        assert_eq!(app.tree_items().len(), 1); // only dir node visible
+    }
+
+    #[test]
+    fn test_toggle_dir_expands_tree() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        app.file_tree_cursor = 0;
+        app.toggle_dir_at_cursor(); // collapse
+        app.toggle_dir_at_cursor(); // expand
+        assert_eq!(app.tree_items().len(), 3);
+    }
+
+    #[test]
+    fn test_toggle_dir_clamps_cursor_on_collapse() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        app.file_tree_cursor = 2; // on File(b.rs)
+        // cursor is not on a dir, so toggle_dir_at_cursor is a no-op
+        app.toggle_dir_at_cursor();
+        assert_eq!(app.file_tree_cursor, 2); // unchanged
+    }
+
+    #[test]
+    fn test_toggle_dir_no_op_on_file() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        app.file_tree_cursor = 1; // File(a.rs)
+        let len_before = app.tree_items().len();
+        app.toggle_dir_at_cursor();
+        assert_eq!(app.tree_items().len(), len_before);
+    }
+
+    #[test]
+    fn test_expand_parents_of_removes_collapsed_dir() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        app.collapsed_dirs.insert(PathBuf::from("src"));
+        app.expand_parents_of(0);
+        assert!(!app.collapsed_dirs.contains(&PathBuf::from("src")));
+    }
+
+    #[test]
+    fn test_expand_parents_of_root_file_no_op() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.expand_parents_of(0); // should not panic
+    }
+
+    #[test]
+    fn test_sync_tree_cursor_to_file() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        // tree: [Dir(0), File(a.rs)=1, File(b.rs)=2]
+        app.selected_file = 1;
+        app.sync_tree_cursor_to_file();
+        assert_eq!(app.file_tree_cursor, 2); // File(b.rs) is at tree index 2
+    }
+
+    #[test]
+    fn test_file_list_down_skips_to_next_file_when_dir() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        // tree: [Dir("src/"), File(a), File(b)] — cursor=0 on Dir
+        app.file_list_down(); // moves to File(a)
+        assert_eq!(app.file_tree_cursor, 1);
+        assert_eq!(app.selected_file, 0); // file_idx 0 = a.rs
+    }
+
+    #[test]
+    fn test_tree_items_notes_propagate_to_dir() {
+        let mut app = App::new(dir_files(), "main".to_string(), "HEAD".to_string());
+        app.notes.push(FeedbackNote {
+            file: PathBuf::from("src/a.rs"),
+            hunk_header: "@@".to_string(),
+            hunk_content: String::new(),
+            note: "note".to_string(),
+        });
+        let tree = app.tree_items();
+        // Dir should have has_notes=true
+        if let crate::filetree::TreeItem::Dir { has_notes, .. } = &tree[0] {
+            assert!(*has_notes);
+        } else {
+            panic!("expected dir as first item");
+        }
     }
 }
