@@ -80,10 +80,16 @@ This convention is required because semver automation from commit history is pla
 
 ## Feature docs & planned improvements
 
-All planned features, design notes, and improvement ideas live in **`docs/features/<module>.md`**, one file per source module (e.g. `docs/features/ui.md` for `src/ui.rs`).
+All planned features, design notes, and improvement ideas live in **`docs/features/<feature>.md`**, one file per **user-visible feature area** — named after what the user sees and interacts with, not after internal source modules.
+
+Current files:
+- `diff-view.md` — the diff panel (hunks, folding, syntax highlighting, planned: full-file view, find, whitespace flags)
+- `file-navigation.md` — the file list panel and notes panel (planned: tree view, find-in-files)
+- `comment-input.md` — the comment popup/editor (planned: line-level comments)
+- `export.md` — the output formats (markdown, JSON)
+- `git-integration.md` — how delta shells out to git, invocation options (planned: whitespace flags backend, line-range fetch)
 
 Rules:
-- Each feature doc describes **current state first**, then planned improvements. It must stay accurate — update it whenever the module changes significantly.
-- When a new module is added (or an existing module is split), create the corresponding feature doc immediately.
-- Do **not** create top-level catch-all docs like `planned-features.md`. Ideas go in the doc of the module they most naturally belong to.
-- Cross-reference related modules when a feature touches multiple files (e.g. "see also `git.md`").
+- Each doc describes **current behaviour first**, then planned improvements. Keep it accurate as the app evolves.
+- When a major new user-visible feature is added, create a new doc for it. Do **not** create docs for internal source modules.
+- Implementation notes (which structs/functions are involved) are fine to include — the audience is a developer.

@@ -44,6 +44,27 @@ Terminal emulators tried in order: `$TERMINAL` env var, `xterm`, `kitty`, `alacr
 
 ---
 
+## Planned improvements
+
+### Whitespace-sensitivity flags (`-w` / `-b`)
+See the diff view docs for the UX design. Backend changes needed:
+
+- `GitBackend::file_diff` needs an optional `DiffOptions` / `WhitespaceMode` parameter.
+- The `git diff` invocation appends `-w`, `-b`, or nothing depending on the mode.
+- Integration tests should cover each mode against a fixture commit that contains whitespace-only changes.
+- `--ignore-blank-lines` (`-B`) could be a third mode if desired.
+
+### Arbitrary line-range fetch
+Needed by the full-file view feature. Goal: fetch a contiguous range of lines from a file at a given git ref, without running a diff.
+
+```rust
+fn file_lines(at: &str, path: &str, start: u32, end: u32) -> Result<String>;
+```
+
+Implementation: `git show <ref>:<path>` then extract the requested lines in Rust (no shell `sed`/`head` — keep it portable on Windows).
+
+---
+
 ## Known issues / open feedback
 
 ### Renamed file shows new path only
