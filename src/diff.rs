@@ -312,4 +312,54 @@ index abc1234..def5678 100644
             }
         }
     }
+
+    #[test]
+    fn test_parse_diff_crlf_line_endings() {
+        // str::lines() splits on \r\n so CRLF input must produce identical
+        // results to LF input.
+        let crlf = SAMPLE_DIFF.replace('\n', "\r\n");
+        let from_lf = parse_diff(SAMPLE_DIFF, modified_file("src/main.rs"));
+        let from_crlf = parse_diff(&crlf, modified_file("src/main.rs"));
+        assert_eq!(from_lf.hunks.len(), from_crlf.hunks.len());
+        for (lf_hunk, crlf_hunk) in from_lf.hunks.iter().zip(from_crlf.hunks.iter()) {
+            assert_eq!(lf_hunk.lines.len(), crlf_hunk.lines.len());
+            for (lf_line, crlf_line) in lf_hunk.lines.iter().zip(crlf_hunk.lines.iter()) {
+                assert_eq!(lf_line.kind, crlf_line.kind);
+                assert_eq!(lf_line.content, crlf_line.content);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_diff_binary_file_produces_no_hunks() {
+        // git emits "Binary files ... differ" with no @@ markers — should parse
+        // to an empty hunk list rather than panicking or misclassifying lines.
+        let raw = "diff --git a/img.png b/img.png\n\
+                   index abc1234..def5678 100644\n\
+                   Binary files a/img.png and b/img.png differ\n";
+        let diff = parse_diff(raw, modified_file("img.png"));
+        assert!(diff.hunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_diff_hunk_with_no_lines_is_empty() {
+        // A @@ header immediately followed by the next @@ (or EOF) must produce
+        // a hunk with zero lines, not a panic or missing hunk.
+        let raw = "@@ -1,0 +1,0 @@\n";
+        let diff = parse_diff(raw, modified_file("src/main.rs"));
+        assert_eq!(diff.hunks.len(), 1);
+        assert!(diff.hunks[0].lines.is_empty());
+    }
+
+    #[test]
+    fn test_parse_diff_content_strips_prefix_char_only() {
+        // "+  indented" strips exactly one char (+), leaving "  indented" (two spaces).
+        // Only the single leading +/-/space sigil is removed, nothing else.
+        let raw = "@@ -1 +1 @@\n+  double indented\n- removed with space\n  context\n";
+        let diff = parse_diff(raw, modified_file("src/main.rs"));
+        let lines = &diff.hunks[0].lines;
+        assert_eq!(lines[0].content, "  double indented");  // two spaces preserved
+        assert_eq!(lines[1].content, " removed with space"); // one space preserved
+        assert_eq!(lines[2].content, " context");            // one space preserved
+    }
 }

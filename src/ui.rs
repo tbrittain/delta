@@ -744,6 +744,163 @@ mod tests {
         assert!(content.contains("added"));
         assert!(content.contains("removed"));
     }
+
+    // ── status_bar_text ───────────────────────────────────────────────────────
+
+    fn app_diff_view() -> App {
+        let mut app = make_app_with_hunks(1);
+        app.focused_panel = Panel::DiffView;
+        app
+    }
+
+    #[test]
+    fn test_status_bar_comment_mode() {
+        let mut app = app_diff_view();
+        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
+        let text = status_bar_text(&app);
+        assert!(text.contains("Ctrl+D: submit"));
+        assert!(text.contains("Esc: cancel"));
+    }
+
+    #[test]
+    fn test_status_bar_file_list_panel() {
+        let mut app = app_diff_view();
+        app.focused_panel = Panel::FileList;
+        let text = status_bar_text(&app);
+        assert!(text.contains("Tab: diff view"));
+        assert!(text.contains("Enter: open"));
+    }
+
+    #[test]
+    fn test_status_bar_notes_view_panel() {
+        let mut app = app_diff_view();
+        app.focused_panel = Panel::NotesView;
+        let text = status_bar_text(&app);
+        assert!(text.contains("Enter: jump"));
+        assert!(text.contains("e: edit"));
+        assert!(text.contains("d: delete"));
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_no_notes_shows_comment_action() {
+        let app = app_diff_view();
+        let text = status_bar_text(&app);
+        assert!(text.contains("c: comment"));
+        assert!(!text.contains("note"));
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_one_note() {
+        let mut app = app_diff_view();
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
+        app.submit_comment();
+        let text = status_bar_text(&app);
+        assert!(text.contains("●1 note"), "expected '●1 note' in {:?}", text);
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_multiple_notes() {
+        let mut app = make_app_with_hunks(2);
+        app.focused_panel = Panel::DiffView;
+        for hunk_idx in [0, 1] {
+            app.mode = Mode::Comment { hunk_idx, input: "note".to_string(), cursor: 0, original: None };
+            app.submit_comment();
+            app.selected_hunk = hunk_idx;
+        }
+        app.selected_hunk = 0;
+        let text = status_bar_text(&app);
+        assert!(text.contains("●2 notes"), "expected '●2 notes' in {:?}", text);
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_hunk_with_note_shows_edit_delete() {
+        let mut app = app_diff_view();
+        app.mode = Mode::Comment { hunk_idx: 0, input: "existing".to_string(), cursor: 0, original: None };
+        app.submit_comment();
+        let text = status_bar_text(&app);
+        assert!(text.contains("e: edit"));
+        assert!(text.contains("d: delete"));
+        assert!(!text.contains("c: comment"));
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_foldable_hunk_shows_expand() {
+        let app = make_app_with_long_context_hunk();
+        let text = status_bar_text(&app);
+        assert!(text.contains("Space: expand"));
+    }
+
+    #[test]
+    fn test_status_bar_diff_view_expanded_hunk_shows_fold() {
+        let mut app = make_app_with_long_context_hunk();
+        app.expanded_hunks.insert(0);
+        let text = status_bar_text(&app);
+        assert!(text.contains("Space: fold"));
+    }
+
+    // ── render_notes_panel ────────────────────────────────────────────────────
+
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn notes_panel_rendered(app: &App) -> String {
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| {
+            render_notes_panel(f, app, f.area());
+        }).unwrap();
+        terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect()
+    }
+
+    fn app_with_note(note_text: &str) -> App {
+        let mut app = make_app_with_hunks(1);
+        app.focused_panel = Panel::DiffView;
+        app.mode = Mode::Comment { hunk_idx: 0, input: note_text.to_string(), cursor: 0, original: None };
+        app.submit_comment();
+        app.focused_panel = Panel::NotesView;
+        app
+    }
+
+    #[test]
+    fn test_notes_panel_empty_shows_placeholder() {
+        let mut app = make_app_with_hunks(1);
+        app.focused_panel = Panel::NotesView;
+        let rendered = notes_panel_rendered(&app);
+        assert!(rendered.contains("No notes yet."));
+    }
+
+    #[test]
+    fn test_notes_panel_short_note_shown_in_full() {
+        let app = app_with_note("short note");
+        let rendered = notes_panel_rendered(&app);
+        assert!(rendered.contains("short note"));
+    }
+
+    #[test]
+    fn test_notes_panel_long_note_truncated() {
+        let long = "a".repeat(60);
+        let app = app_with_note(&long);
+        let rendered = notes_panel_rendered(&app);
+        // Should contain the truncation indicator but not the full 60-char string
+        assert!(rendered.contains("…"));
+        assert!(!rendered.contains(&"a".repeat(56)));
+    }
+
+    #[test]
+    fn test_notes_panel_expanded_note_shows_full_text() {
+        let long = "a".repeat(60);
+        let mut app = app_with_note(&long);
+        app.expanded_notes.insert(0);
+        let rendered = notes_panel_rendered(&app);
+        assert!(rendered.contains(&"a".repeat(60)));
+        assert!(!rendered.contains("…"));
+    }
+
+    #[test]
+    fn test_notes_panel_selected_note_has_marker() {
+        let app = app_with_note("my note");
+        let rendered = notes_panel_rendered(&app);
+        assert!(rendered.contains("▶"));
+    }
 }
 
 fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
@@ -823,8 +980,8 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
-fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let text = match app.mode {
+fn status_bar_text(app: &App) -> String {
+    match app.mode {
         Mode::Comment { .. } => " Ctrl+D: submit  Enter: newline  Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
             Panel::FileList => {
@@ -864,9 +1021,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 )
             }
         },
-    };
+    }
+}
 
+fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let style = Style::default().add_modifier(Modifier::REVERSED);
-    let bar = Paragraph::new(text).style(style);
+    let bar = Paragraph::new(status_bar_text(app)).style(style);
     frame.render_widget(bar, area);
 }
