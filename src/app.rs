@@ -238,16 +238,18 @@ impl App {
         }).sum()
     }
 
-    /// Adjust `comment_scroll` so the cursor line is visible within the popup viewport.
-    pub fn scroll_comment_to_cursor(&mut self, viewport_height: usize) {
-        let cursor_line = match &self.mode {
-            Mode::Comment { input, cursor, .. } => input[..*cursor].matches('\n').count(),
+    /// Adjust `comment_scroll` so the cursor stays visible within the popup viewport.
+    /// `content_width` is the number of characters per visual line (popup width minus borders);
+    /// it is used to compute the correct visual row when long lines wrap.
+    pub fn scroll_comment_to_cursor(&mut self, viewport_height: usize, content_width: usize) {
+        let cursor_visual_row = match &self.mode {
+            Mode::Comment { input, cursor, .. } => visual_row_for_cursor(input, *cursor, content_width),
             _ => return,
         };
-        if cursor_line < self.comment_scroll {
-            self.comment_scroll = cursor_line;
-        } else if viewport_height > 0 && cursor_line + 1 > self.comment_scroll + viewport_height {
-            self.comment_scroll = cursor_line + 1 - viewport_height;
+        if cursor_visual_row < self.comment_scroll {
+            self.comment_scroll = cursor_visual_row;
+        } else if viewport_height > 0 && cursor_visual_row + 1 > self.comment_scroll + viewport_height {
+            self.comment_scroll = cursor_visual_row + 1 - viewport_height;
         }
     }
 
@@ -398,6 +400,28 @@ fn hunk_has_foldable_context(lines: &[DiffLine]) -> bool {
         }
     }
     false
+}
+
+/// Returns the visual row index of `cursor` within `input`, accounting for line wrapping
+/// at `content_width` characters. Used by `scroll_comment_to_cursor`.
+pub(crate) fn visual_row_for_cursor(input: &str, cursor: usize, content_width: usize) -> usize {
+    let cw = content_width.max(1);
+    let mut visual_row = 0usize;
+    let mut byte_pos = 0usize;
+    for logical_line in input.split('\n') {
+        let char_count = logical_line.chars().count();
+        let line_byte_end = byte_pos + logical_line.len();
+        if cursor >= byte_pos && cursor <= line_byte_end {
+            let char_offset = logical_line[..cursor - byte_pos].chars().count();
+            // Cursor at end of line (char_offset == char_count) belongs to the last visual row,
+            // not the (out-of-range) row after it.
+            let clamped = if char_count == 0 { 0 } else { char_offset.min(char_count - 1) };
+            return visual_row + clamped / cw;
+        }
+        visual_row += if char_count == 0 { 1 } else { (char_count + cw - 1) / cw };
+        byte_pos = line_byte_end + 1;
+    }
+    visual_row.saturating_sub(1)
 }
 
 /// Returns `Some((start, end))` where `start < end` if there is a non-empty selection,
@@ -803,26 +827,59 @@ mod tests {
         assert_eq!(app.diff_scroll, 0);
     }
 
+    // ── visual_row_for_cursor ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_visual_row_no_wrap() {
+        // Width > line length: no wrapping, rows == logical line indices.
+        assert_eq!(visual_row_for_cursor("hello\nworld", 0,   100), 0); // start of "hello"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 5,   100), 0); // end of "hello"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 6,   100), 1); // start of "world"
+        assert_eq!(visual_row_for_cursor("hello\nworld", 11,  100), 1); // end of "world"
+    }
+
+    #[test]
+    fn test_visual_row_with_wrap() {
+        // "hellothere" with width=5 wraps to ["hello"(row 0), "there"(row 1)]
+        assert_eq!(visual_row_for_cursor("hellothere", 0, 5), 0);
+        assert_eq!(visual_row_for_cursor("hellothere", 4, 5), 0); // in "hello"
+        assert_eq!(visual_row_for_cursor("hellothere", 5, 5), 1); // start of "there"
+        assert_eq!(visual_row_for_cursor("hellothere", 10, 5), 1); // end of "there"
+    }
+
+    #[test]
+    fn test_visual_row_multiline_with_wrap() {
+        // "hi\nhellothere" with width=5:
+        //   row 0: "hi"        (bytes 0..2)
+        //   row 1: "hello"     (bytes 3..7 in full input = chars 0..4 of "hellothere")
+        //   row 2: "there"     (bytes 8..12 in full input = chars 5..9 of "hellothere")
+        let input = "hi\nhellothere";
+        assert_eq!(visual_row_for_cursor(input, 0,  5), 0); // 'h' of "hi"
+        assert_eq!(visual_row_for_cursor(input, 2,  5), 0); // end of "hi"
+        assert_eq!(visual_row_for_cursor(input, 3,  5), 1); // 'h' = first char of "hellothere"
+        assert_eq!(visual_row_for_cursor(input, 7,  5), 1); // 'o' = char 4 of "hellothere"
+        assert_eq!(visual_row_for_cursor(input, 8,  5), 2); // 't' = char 5 of "hellothere", first of "there"
+        assert_eq!(visual_row_for_cursor(input, 13, 5), 2); // end of "hellothere"
+    }
+
     // ── Comment popup scrolling ───────────────────────────────────────────────
 
     #[test]
     fn test_scroll_comment_to_cursor_scrolls_down_when_cursor_below_viewport() {
         let mut app = app_with_diff(1);
         let input = "a\nb\nc\nd\ne".to_string();
-        let cursor = input.len(); // cursor on line 4
+        let cursor = input.len(); // cursor on visual row 4 (width=100: no wrap)
         app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None };
-        app.scroll_comment_to_cursor(3);
-        // cursor_line=4, viewport=3 → scroll = 4+1-3 = 2
-        assert_eq!(app.comment_scroll, 2);
+        app.scroll_comment_to_cursor(3, 100);
+        assert_eq!(app.comment_scroll, 2); // 4+1-3 = 2
     }
 
     #[test]
     fn test_scroll_comment_to_cursor_no_scroll_when_cursor_visible() {
         let mut app = app_with_diff(1);
         let input = "line1\nline2".to_string();
-        let cursor = 5; // end of "line1", cursor on line 0
-        app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None };
-        app.scroll_comment_to_cursor(5);
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 5, original: None };
+        app.scroll_comment_to_cursor(5, 100);
         assert_eq!(app.comment_scroll, 0);
     }
 
@@ -831,8 +888,8 @@ mod tests {
         let mut app = app_with_diff(1);
         let input = "a\nb\nc\nd\ne".to_string();
         app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 0, original: None };
-        app.comment_scroll = 3; // viewport shows lines 3+, cursor on line 0
-        app.scroll_comment_to_cursor(3);
+        app.comment_scroll = 3;
+        app.scroll_comment_to_cursor(3, 100);
         assert_eq!(app.comment_scroll, 0);
     }
 
@@ -840,8 +897,24 @@ mod tests {
     fn test_scroll_comment_to_cursor_no_op_outside_comment_mode() {
         let mut app = app_with_diff(1);
         app.comment_scroll = 5;
-        app.scroll_comment_to_cursor(10); // not in comment mode
+        app.scroll_comment_to_cursor(10, 100);
         assert_eq!(app.comment_scroll, 5);
+    }
+
+    #[test]
+    fn test_scroll_comment_to_cursor_accounts_for_wrap() {
+        // Single long line that wraps: "aaaaaaaaaa" (10 a's) with content_width=5
+        // Visual rows: row 0 = "aaaaa", row 1 = "aaaaa"
+        // cursor at byte 7 (in second visual row) with viewport=1 should scroll to row 1
+        let mut app = app_with_diff(1);
+        app.mode = Mode::Comment {
+            hunk_idx: 0,
+            input: "aaaaaaaaaa".to_string(),
+            cursor: 7,
+            original: None,
+        };
+        app.scroll_comment_to_cursor(1, 5);
+        assert_eq!(app.comment_scroll, 1);
     }
 
     // ── Edit / delete notes ───────────────────────────────────────────────────

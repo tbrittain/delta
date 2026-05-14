@@ -16,15 +16,18 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::app::{App, FeedbackNote, Mode, Panel, FOLD_THRESHOLD, delete_selection, selected_range};
+use crate::app::{
+    App, FeedbackNote, Mode, Panel, FOLD_THRESHOLD,
+    delete_selection, selected_range, visual_row_for_cursor,
+};
 use crate::diff::{ChangedFile, FileStatus, LineKind};
 use crate::git::GitBackend;
 use crate::highlight::HighlightedSpan;
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const ACCENT: Color = Color::Cyan;
-const MUTED: Color = Color::Rgb(100, 110, 130);
-const NOTE_FG: Color = Color::Rgb(100, 150, 210);
+const MUTED:  Color = Color::Rgb(100, 110, 130);
+const NOTE_FG:Color = Color::Rgb(100, 150, 210);
 const SEL_BG: Color = Color::Rgb(60, 80, 140);
 
 // ── Clipboard I/O (boundary layer — not unit tested) ─────────────────────────
@@ -48,7 +51,6 @@ pub fn run<G: GitBackend>(
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    // Use a blinking bar (I-beam) cursor — it overlays text without displacing it.
     execute!(stdout, SetCursorStyle::BlinkingBar)?;
 
     let backend = CrosstermBackend::new(stdout);
@@ -68,26 +70,103 @@ pub fn run<G: GitBackend>(
 }
 
 fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
-    if app.files.is_empty() {
-        return;
-    }
+    if app.files.is_empty() { return; }
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     log::debug!("[ui] load_current_file: path={:?}", path);
     let result = git.file_diff(&app.from, &app.to, &path);
-    log::debug!(
-        "[ui] load_current_file: file_diff result={}",
-        match &result { Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})") }
-    );
+    log::debug!("[ui] load_current_file: file_diff result={}", match &result {
+        Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})")
+    });
     app.current_diff = result.ok().map(|raw| crate::diff::parse_diff(&raw, file));
     app.current_highlights = app.current_diff.as_ref().map(|d| app.highlighter.highlight_diff(d));
-    log::debug!(
-        "[ui] load_current_file: current_diff={}",
-        match &app.current_diff {
-            Some(d) => format!("Some({} hunks)", d.hunks.len()),
-            None => "None".into(),
+    log::debug!("[ui] load_current_file: current_diff={}", match &app.current_diff {
+        Some(d) => format!("Some({} hunks)", d.hunks.len()), None => "None".into()
+    });
+}
+
+// ── Visual-line helpers ───────────────────────────────────────────────────────
+
+/// One visual (screen) line of the comment editor.
+/// `text` is the substring of the logical line for this visual row;
+/// `byte_start` is its byte offset in the full input string;
+/// `is_eol` is true if this is the last visual row of its logical line
+/// (meaning the cursor may sit at byte_start + text.len()).
+#[derive(Debug, Clone)]
+struct VisualLine {
+    text: String,
+    byte_start: usize,
+    is_eol: bool,
+}
+
+/// Split `input` into visual lines of at most `content_width` characters each.
+fn compute_visual_lines(input: &str, content_width: usize) -> Vec<VisualLine> {
+    let cw = content_width.max(1);
+    let mut result = Vec::new();
+    let mut byte_pos = 0usize;
+
+    for logical_line in input.split('\n') {
+        if logical_line.is_empty() {
+            result.push(VisualLine { text: String::new(), byte_start: byte_pos, is_eol: true });
+        } else {
+            let chars: Vec<(usize, char)> = logical_line.char_indices().collect();
+            let char_count = chars.len();
+            let mut char_start = 0;
+            while char_start < char_count {
+                let char_end = (char_start + cw).min(char_count);
+                let byte_start = byte_pos + chars[char_start].0;
+                let text: String = chars[char_start..char_end].iter().map(|(_, c)| *c).collect();
+                let is_eol = char_end == char_count;
+                result.push(VisualLine { text, byte_start, is_eol });
+                char_start = char_end;
+            }
         }
-    );
+        byte_pos += logical_line.len() + 1; // +1 for '\n'
+    }
+
+    result
+}
+
+/// Return `(visual_row, visual_col)` for `cursor` within the pre-computed visual lines.
+fn visual_row_and_col(cursor: usize, visual_lines: &[VisualLine]) -> (usize, usize) {
+    for (vrow, vl) in visual_lines.iter().enumerate() {
+        let vl_end = vl.byte_start + vl.text.len();
+        let on_line = if vl.is_eol {
+            cursor >= vl.byte_start && cursor <= vl_end
+        } else {
+            cursor >= vl.byte_start && cursor < vl_end
+        };
+        if on_line {
+            let col_bytes = (cursor - vl.byte_start).min(vl.text.len());
+            let col = vl.text[..col_bytes].chars().count();
+            return (vrow, col);
+        }
+    }
+    let last = visual_lines.len().saturating_sub(1);
+    let last_col = visual_lines.last().map(|vl| vl.text.chars().count()).unwrap_or(0);
+    (last, last_col)
+}
+
+/// Move the cursor to the visual row above, preserving the visual column.
+fn cursor_up_visual(input: &str, cursor: usize, content_width: usize) -> usize {
+    let vls = compute_visual_lines(input, content_width);
+    let (vrow, vcol) = visual_row_and_col(cursor, &vls);
+    if vrow == 0 { return cursor; }
+    let prev = &vls[vrow - 1];
+    let char_count = prev.text.chars().count();
+    let target_col = vcol.min(char_count);
+    prev.byte_start + prev.text.char_indices().nth(target_col).map(|(b, _)| b).unwrap_or(prev.text.len())
+}
+
+/// Move the cursor to the visual row below, preserving the visual column.
+fn cursor_down_visual(input: &str, cursor: usize, content_width: usize) -> usize {
+    let vls = compute_visual_lines(input, content_width);
+    let (vrow, vcol) = visual_row_and_col(cursor, &vls);
+    if vrow + 1 >= vls.len() { return cursor; }
+    let next = &vls[vrow + 1];
+    let char_count = next.text.chars().count();
+    let target_col = vcol.min(char_count);
+    next.byte_start + next.text.char_indices().nth(target_col).map(|(b, _)| b).unwrap_or(next.text.len())
 }
 
 fn run_event_loop<G: GitBackend>(
@@ -98,13 +177,8 @@ fn run_event_loop<G: GitBackend>(
     loop {
         terminal.draw(|f| render(f, app))?;
 
-        let Event::Key(key) = event::read()? else {
-            continue;
-        };
-
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
+        let Event::Key(key) = event::read()? else { continue; };
+        if key.kind != KeyEventKind::Press { continue; }
 
         match app.mode.clone() {
             Mode::Normal => {
@@ -112,35 +186,28 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('q') => break,
                     KeyCode::Tab => {
                         app.focused_panel = match app.focused_panel {
-                            Panel::FileList => Panel::DiffView,
-                            Panel::DiffView => {
-                                if !app.notes.is_empty() { Panel::NotesView } else { Panel::FileList }
-                            }
+                            Panel::FileList  => Panel::DiffView,
+                            Panel::DiffView  => if !app.notes.is_empty() { Panel::NotesView } else { Panel::FileList },
                             Panel::NotesView => Panel::FileList,
                         };
                     }
                     KeyCode::BackTab => {
                         app.focused_panel = match app.focused_panel {
-                            Panel::FileList => {
-                                if !app.notes.is_empty() { Panel::NotesView } else { Panel::DiffView }
-                            }
-                            Panel::DiffView => Panel::FileList,
+                            Panel::FileList  => if !app.notes.is_empty() { Panel::NotesView } else { Panel::DiffView },
+                            Panel::DiffView  => Panel::FileList,
                             Panel::NotesView => Panel::DiffView,
                         };
                     }
                     KeyCode::Up => match app.focused_panel {
-                        Panel::FileList => app.file_list_up(),
-                        Panel::DiffView => app.diff_scroll_up(),
+                        Panel::FileList  => app.file_list_up(),
+                        Panel::DiffView  => app.diff_scroll_up(),
                         Panel::NotesView => app.notes_up(),
                     },
                     KeyCode::Down => match app.focused_panel {
-                        Panel::FileList => app.file_list_down(),
-                        Panel::DiffView => {
-                            let viewport = terminal
-                                .size()
-                                .map(|r| r.height.saturating_sub(3) as usize)
-                                .unwrap_or(20);
-                            app.diff_scroll_down(viewport);
+                        Panel::FileList  => app.file_list_down(),
+                        Panel::DiffView  => {
+                            let vp = terminal.size().map(|r| r.height.saturating_sub(3) as usize).unwrap_or(20);
+                            app.diff_scroll_down(vp);
                         }
                         Panel::NotesView => app.notes_down(),
                     },
@@ -152,22 +219,16 @@ fn run_event_loop<G: GitBackend>(
                             jump_to_note(app, git);
                         }
                     }
-                    KeyCode::Char('[') => {
-                        if app.focused_panel == Panel::DiffView { app.prev_hunk(); }
-                    }
-                    KeyCode::Char(']') => {
-                        if app.focused_panel == Panel::DiffView { app.next_hunk(); }
-                    }
-                    KeyCode::Char('c') => {
-                        if app.focused_panel == Panel::DiffView { app.start_comment(); }
-                    }
+                    KeyCode::Char('[') => { if app.focused_panel == Panel::DiffView { app.prev_hunk(); } }
+                    KeyCode::Char(']') => { if app.focused_panel == Panel::DiffView { app.next_hunk(); } }
+                    KeyCode::Char('c') => { if app.focused_panel == Panel::DiffView { app.start_comment(); } }
                     KeyCode::Char(' ') => match app.focused_panel {
-                        Panel::DiffView   => app.toggle_hunk_fold(),
-                        Panel::NotesView  => app.toggle_note_expand(),
+                        Panel::DiffView  => app.toggle_hunk_fold(),
+                        Panel::NotesView => app.toggle_note_expand(),
                         _ => {}
                     },
                     KeyCode::Char('e') => match app.focused_panel {
-                        Panel::DiffView => { app.edit_note_for_current_hunk(); }
+                        Panel::DiffView  => { app.edit_note_for_current_hunk(); }
                         Panel::NotesView => { jump_to_note(app, git); app.edit_note_for_current_hunk(); }
                         _ => {}
                     },
@@ -181,7 +242,6 @@ fn run_event_loop<G: GitBackend>(
                     },
                     _ => {}
                 }
-
                 if app.focused_panel == Panel::FileList && app.current_diff.is_none() {
                     load_current_file(app, git);
                 }
@@ -190,6 +250,10 @@ fn run_event_loop<G: GitBackend>(
             Mode::Comment { mut input, hunk_idx, mut cursor, original } => {
                 let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                 let ctrl  = key.modifiers.contains(KeyModifiers::CONTROL);
+
+                // Popup content width needed for visual-line cursor operations.
+                let (tw, th) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((80, 24));
+                let content_width = comment_popup_content_width(tw, th);
 
                 macro_rules! extend { () => {
                     if app.comment_anchor.is_none() { app.comment_anchor = Some(cursor); }
@@ -201,10 +265,8 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Esc => { app.cancel_comment(); true }
 
                     KeyCode::Char('a') if ctrl => {
-                        app.comment_anchor = Some(0);
-                        cursor = input.len();
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.comment_anchor = Some(0); cursor = input.len();
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
                     KeyCode::Char('c') if ctrl => {
                         if let Some((s, e)) = selected_range(cursor, app.comment_anchor) {
@@ -213,9 +275,7 @@ fn run_event_loop<G: GitBackend>(
                         true
                     }
                     KeyCode::Char('x') if ctrl => {
-                        if let Some((new_input, new_cursor)) =
-                            delete_selection(&input, cursor, app.comment_anchor)
-                        {
+                        if let Some((new_input, new_cursor)) = delete_selection(&input, cursor, app.comment_anchor) {
                             if let Some((s, _)) = selected_range(cursor, app.comment_anchor) {
                                 let end = s + cursor.max(app.comment_anchor.unwrap_or(cursor))
                                     - cursor.min(app.comment_anchor.unwrap_or(cursor));
@@ -223,8 +283,7 @@ fn run_event_loop<G: GitBackend>(
                             }
                             input = new_input; cursor = new_cursor; app.comment_anchor = None;
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
                     KeyCode::Char('v') if ctrl => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
@@ -233,8 +292,7 @@ fn run_event_loop<G: GitBackend>(
                         if let Some(text) = clipboard_get() {
                             for c in text.chars() { input.insert(cursor, c); cursor += c.len_utf8(); }
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
 
                     KeyCode::Enter => {
@@ -242,18 +300,17 @@ fn run_event_loop<G: GitBackend>(
                             input = ni; cursor = nc; app.comment_anchor = None;
                         }
                         input.insert(cursor, '\n'); cursor += 1;
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
 
-                    KeyCode::Up    if shift => { extend!(); cursor = cursor_up(&input, cursor);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Up              => { clear_sel!(); cursor = cursor_up(&input, cursor);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Down  if shift => { extend!(); cursor = cursor_down(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Down            => { clear_sel!(); cursor = cursor_down(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Home  if shift => { extend!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Home            => { clear_sel!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::End   if shift => { extend!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::End             => { clear_sel!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Up   if shift => { extend!(); cursor = cursor_up_visual(&input, cursor, content_width);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Up            => { clear_sel!(); cursor = cursor_up_visual(&input, cursor, content_width);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Down if shift => { extend!(); cursor = cursor_down_visual(&input, cursor, content_width); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Down          => { clear_sel!(); cursor = cursor_down_visual(&input, cursor, content_width); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Home if shift => { extend!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Home          => { clear_sel!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::End  if shift => { extend!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::End           => { clear_sel!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
 
                     KeyCode::Left if ctrl && shift => { extend!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
                     KeyCode::Left if ctrl           => { clear_sel!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
@@ -270,11 +327,9 @@ fn run_event_loop<G: GitBackend>(
                             input = ni; cursor = nc; app.comment_anchor = None;
                         } else if cursor > 0 {
                             let prev = cursor_prev(&input, cursor);
-                            input.drain(prev..cursor);
-                            cursor = prev;
+                            input.drain(prev..cursor); cursor = prev;
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
                     KeyCode::Delete => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
@@ -283,28 +338,24 @@ fn run_event_loop<G: GitBackend>(
                             let next = cursor_next(&input, cursor);
                             input.drain(cursor..next);
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
                     KeyCode::Char(c) if !ctrl => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
                             input = ni; cursor = nc; app.comment_anchor = None;
                         }
                         input.insert(cursor, c); cursor += c.len_utf8();
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original };
-                        true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
                     }
                     _ => false,
                 };
 
                 if consumed && matches!(app.mode, Mode::Comment { .. }) {
-                    let popup_content_height = terminal.size()
-                        .map(|s| {
-                            let popup = comment_popup_area(s.width, s.height.saturating_sub(1));
-                            popup.height.saturating_sub(3) as usize
-                        })
-                        .unwrap_or(5);
-                    app.scroll_comment_to_cursor(popup_content_height);
+                    let (tw2, th2) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((80, 24));
+                    let cw2 = comment_popup_content_width(tw2, th2);
+                    let popup = comment_popup_area(tw2, th2.saturating_sub(1));
+                    let viewport_height = popup.height.saturating_sub(3) as usize;
+                    app.scroll_comment_to_cursor(viewport_height, cw2);
                 }
             }
         }
@@ -330,7 +381,6 @@ fn render(frame: &mut Frame, app: &App) {
     };
 
     render_file_list(frame, app, file_area);
-
     if !app.notes.is_empty() {
         let areas = Layout::default()
             .direction(Direction::Vertical)
@@ -341,11 +391,9 @@ fn render(frame: &mut Frame, app: &App) {
     } else {
         render_diff_view(frame, app, right_area);
     }
-
     if matches!(app.mode, Mode::Comment { .. }) {
         render_comment_popup(frame, app, vertical[0]);
     }
-
     render_status_bar(frame, app, vertical[1]);
 }
 
@@ -356,7 +404,6 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
-
     let items: Vec<ListItem> = app.files.iter().enumerate().map(|(i, f)| {
         let has_notes = app.notes.iter().any(|n| n.file == f.path);
         let note_marker = if has_notes { " ●" } else { "" };
@@ -376,7 +423,6 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!(" {}{}", f.path.display(), note_marker), base_style),
         ]))
     }).collect();
-
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
@@ -397,21 +443,17 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
-
     let title = {
         let file_name = app.files.get(app.selected_file)
-            .map(|f| f.path.display().to_string())
-            .unwrap_or_else(|| "Diff".to_string());
+            .map(|f| f.path.display().to_string()).unwrap_or_else(|| "Diff".to_string());
         match &app.current_diff {
             Some(diff) if !diff.hunks.is_empty() =>
                 format!(" {} — {}/{} ", file_name, app.selected_hunk + 1, diff.hunks.len()),
             _ => format!(" {} ", file_name),
         }
     };
-
     let note_max_chars = area.width.saturating_sub(6) as usize;
     let text = build_diff_text(app, note_max_chars);
-
     let para = Paragraph::new(text)
         .block(Block::default()
             .borders(Borders::ALL)
@@ -420,7 +462,6 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().bg(app.highlighter.panel_bg))
             .title(title))
         .scroll((app.diff_scroll as u16, 0));
-
     frame.render_widget(para, area);
 }
 
@@ -432,15 +473,19 @@ fn comment_popup_area(total_width: u16, total_height: u16) -> Rect {
     Rect {
         x: (total_width.saturating_sub(width)) / 2,
         y: (total_height.saturating_sub(height)) / 2,
-        width,
-        height,
+        width, height,
     }
 }
 
-/// Build styled spans for one line of comment input.
-///
-/// Only handles selection highlighting — the cursor is rendered by the
-/// terminal itself via `frame.set_cursor_position` and blinks as a bar.
+/// Content width (characters) of the popup's text area.
+fn comment_popup_content_width(term_width: u16, term_height: u16) -> usize {
+    let popup = comment_popup_area(term_width, term_height.saturating_sub(1));
+    // subtract 2 borders
+    popup.width.saturating_sub(2) as usize
+}
+
+/// Build styled spans for one visual line of comment input (selection highlighting only).
+/// The cursor is positioned via `frame.set_cursor_position`, not embedded in the spans.
 pub(crate) fn line_spans(
     line_text: &str,
     line_start_byte: usize,
@@ -454,11 +499,9 @@ pub(crate) fn line_spans(
             (ls, le)
         }
     };
-
     if ls >= le {
         return vec![Span::raw(line_text.to_string())];
     }
-
     let sel_style = Style::default().bg(SEL_BG).fg(Color::White);
     let mut spans: Vec<Span<'static>> = Vec::new();
     if ls > 0            { spans.push(Span::raw(line_text[..ls].to_string())); }
@@ -472,7 +515,6 @@ fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
 
     let rel = comment_popup_area(area.width, area.height);
     let popup = Rect { x: area.x + rel.x, y: area.y + rel.y, width: rel.width, height: rel.height };
-
     frame.render_widget(Clear, popup);
 
     let hunk_header = app.current_diff.as_ref()
@@ -482,9 +524,7 @@ fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
     let max_title = popup.width.saturating_sub(4) as usize;
     let title_hunk: String = if hunk_header.chars().count() > max_title {
         format!("{}…", hunk_header.chars().take(max_title.saturating_sub(1)).collect::<String>())
-    } else {
-        hunk_header
-    };
+    } else { hunk_header };
     let title = if title_hunk.is_empty() { " Comment ".to_string() } else { format!(" {} ", title_hunk) };
 
     let block = Block::default()
@@ -493,7 +533,6 @@ fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(ACCENT))
         .style(Style::default().bg(app.highlighter.panel_bg))
         .title(title);
-
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
     if inner.height < 2 { return; }
@@ -505,29 +544,31 @@ fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
     let content_area = layout[0];
     let help_area    = layout[1];
 
-    // Render text with selection highlighting (no embedded cursor character).
+    let content_width = content_area.width as usize;
     let selection = selected_range(cursor, app.comment_anchor);
-    let input_lines: Vec<&str> = input.split('\n').collect();
-    let mut line_start_byte = 0;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for line_text in &input_lines {
-        lines.push(Line::from(line_spans(line_text, line_start_byte, selection)));
-        line_start_byte += line_text.len() + 1; // +1 for '\n'
+
+    // Pre-wrap text ourselves so cursor position and ratatui's rendering agree exactly.
+    let visual_lines = compute_visual_lines(input, content_width);
+    let (cursor_vrow, cursor_vcol) = visual_row_and_col(cursor, &visual_lines);
+
+    let mut rendered_lines: Vec<Line<'static>> = visual_lines.iter()
+        .map(|vl| Line::from(line_spans(&vl.text, vl.byte_start, selection)))
+        .collect();
+    // Ensure the content area always has at least one line so the cursor renders.
+    if rendered_lines.is_empty() {
+        rendered_lines.push(Line::raw(""));
     }
 
-    let content_para = Paragraph::new(Text::from(lines))
-        .scroll((app.comment_scroll as u16, 0))
-        .wrap(Wrap { trim: false });
+    // Render without ratatui Wrap (we already wrapped manually).
+    let content_para = Paragraph::new(Text::from(rendered_lines))
+        .scroll((app.comment_scroll as u16, 0));
     frame.render_widget(content_para, content_area);
 
-    // Position the blinking bar cursor. Uses logical lines/cols — accurate when
-    // lines are shorter than the content width (typical for prose comments).
-    let cursor_line = input[..cursor].matches('\n').count();
-    let cursor_col  = input[..cursor].split('\n').last().map(|s| s.chars().count()).unwrap_or(0);
-    if cursor_line >= app.comment_scroll {
-        let visible_row = (cursor_line - app.comment_scroll) as u16;
+    // Position the blinking bar cursor at the correct visual row/col.
+    if cursor_vrow >= app.comment_scroll {
+        let visible_row = (cursor_vrow - app.comment_scroll) as u16;
         if visible_row < content_area.height {
-            let x = (content_area.x + cursor_col as u16).min(content_area.x + content_area.width.saturating_sub(1));
+            let x = (content_area.x + cursor_vcol as u16).min(content_area.x + content_area.width.saturating_sub(1));
             let y = content_area.y + visible_row;
             frame.set_cursor_position((x, y));
         }
@@ -552,31 +593,6 @@ fn cursor_next(s: &str, cursor: usize) -> usize {
     let mut pos = cursor + 1;
     while pos < s.len() && !s.is_char_boundary(pos) { pos += 1; }
     pos
-}
-
-fn cursor_up(input: &str, cursor: usize) -> usize {
-    let before = &input[..cursor];
-    let Some(prev_nl) = before.rfind('\n') else { return cursor };
-    let current_line_start = prev_nl + 1;
-    let char_col = input[current_line_start..cursor].chars().count();
-    let prev_line_start = input[..prev_nl].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let prev_line = &input[prev_line_start..prev_nl];
-    let target_byte = prev_line.char_indices().nth(char_col).map(|(i, _)| i).unwrap_or(prev_line.len());
-    prev_line_start + target_byte
-}
-
-fn cursor_down(input: &str, cursor: usize) -> usize {
-    let current_line_start = input[..cursor].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let char_col = input[current_line_start..cursor].chars().count();
-    let rest = &input[cursor..];
-    let Some(nl_offset) = rest.find('\n') else { return cursor };
-    let next_line_start = cursor + nl_offset + 1;
-    let next_line_end = input[next_line_start..].find('\n')
-        .map(|p| next_line_start + p)
-        .unwrap_or(input.len());
-    let next_line = &input[next_line_start..next_line_end];
-    let target_byte = next_line.char_indices().nth(char_col).map(|(i, _)| i).unwrap_or(next_line.len());
-    next_line_start + target_byte
 }
 
 fn cursor_home(input: &str, cursor: usize) -> usize {
@@ -693,7 +709,6 @@ fn push_diff_lines_folded(
 
 pub(crate) fn build_diff_text(app: &App, note_max_chars: usize) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-
     let Some(ref diff) = app.current_diff else {
         lines.push(Line::from(Span::styled("Loading…", Style::default().fg(Color::DarkGray))));
         return Text::from(lines);
@@ -702,21 +717,17 @@ pub(crate) fn build_diff_text(app: &App, note_max_chars: usize) -> Text<'static>
         lines.push(Line::from(Span::styled("No diff content.", Style::default().fg(Color::DarkGray))));
         return Text::from(lines);
     }
-
     for (hunk_idx, hunk) in diff.hunks.iter().enumerate() {
         let is_selected = hunk_idx == app.selected_hunk && app.focused_panel == Panel::DiffView;
         let header_style = if is_selected {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        };
+        } else { Style::default().fg(MUTED) };
         let marker_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
         if is_selected {
             lines.push(Line::from(vec![Span::styled("▶ ", marker_style), Span::styled(hunk.header.clone(), header_style)]));
         } else {
             lines.push(Line::from(vec![Span::raw("  "), Span::styled(hunk.header.clone(), header_style)]));
         }
-
         let hunk_hl = app.current_highlights.as_ref().and_then(|h| h.get(hunk_idx));
         if app.expanded_hunks.contains(&hunk_idx) {
             for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
@@ -726,7 +737,6 @@ pub(crate) fn build_diff_text(app: &App, note_max_chars: usize) -> Text<'static>
         } else {
             push_diff_lines_folded(&hunk.lines, hunk_hl.map(|h| h.as_slice()), &mut lines);
         }
-
         for note in &app.notes {
             if note.file == diff.file.path && note.hunk_header == hunk.header {
                 let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
@@ -734,16 +744,13 @@ pub(crate) fn build_diff_text(app: &App, note_max_chars: usize) -> Text<'static>
                     let prefix = if i == 0 { "  ◎ " } else { "    " };
                     let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
                         format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
-                    } else {
-                        line_text.to_string()
-                    };
+                    } else { line_text.to_string() };
                     lines.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
                 }
             }
         }
         lines.push(Line::raw(""));
     }
-
     Text::from(lines)
 }
 
@@ -756,11 +763,9 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
-
     let content_width = area.width.saturating_sub(2) as usize;
     let max_header = content_width.saturating_sub(2);
     let max_text   = content_width.saturating_sub(4);
-
     let mut lines: Vec<Line<'static>> = Vec::new();
     if app.notes.is_empty() {
         lines.push(Line::from(Span::styled("No notes yet.", Style::default().fg(Color::DarkGray))));
@@ -770,18 +775,13 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
             let is_expanded = app.expanded_notes.contains(&i);
             let header_style = if is_selected {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(MUTED)
-            };
+            } else { Style::default().fg(MUTED) };
             let marker = if is_selected { "▶ " } else { "  " };
             let full_header = format!("{} · {}", note.file.display(), note.hunk_header);
             let header_text = if full_header.chars().count() > max_header {
                 format!("{}…", full_header.chars().take(max_header.saturating_sub(1)).collect::<String>())
-            } else {
-                full_header
-            };
+            } else { full_header };
             lines.push(Line::from(Span::styled(format!("{}{}", marker, header_text), header_style)));
-
             let note_style = Style::default().fg(Color::White);
             if is_expanded {
                 for line_text in note.note.lines() {
@@ -791,15 +791,12 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
                 let first_line = note.note.lines().next().unwrap_or("");
                 let truncated = if first_line.chars().count() > max_text {
                     format!("{}…", first_line.chars().take(max_text.saturating_sub(1)).collect::<String>())
-                } else {
-                    first_line.to_string()
-                };
+                } else { first_line.to_string() };
                 lines.push(Line::from(vec![Span::raw("    "), Span::styled(truncated, note_style)]));
             }
             lines.push(Line::raw(""));
         }
     }
-
     let para = Paragraph::new(Text::from(lines))
         .block(Block::default()
             .borders(Borders::ALL)
@@ -891,6 +888,135 @@ mod tests {
         span.style.bg == Some(SEL_BG)
     }
 
+    // ── compute_visual_lines ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_visual_lines_short_line_no_wrap() {
+        let vls = compute_visual_lines("hello", 10);
+        assert_eq!(vls.len(), 1);
+        assert_eq!(vls[0].text, "hello");
+        assert_eq!(vls[0].byte_start, 0);
+        assert!(vls[0].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_wraps_long_line() {
+        // "hellothere" with width 5 → ["hello", "there"]
+        let vls = compute_visual_lines("hellothere", 5);
+        assert_eq!(vls.len(), 2);
+        assert_eq!(vls[0].text, "hello"); assert_eq!(vls[0].byte_start, 0); assert!(!vls[0].is_eol);
+        assert_eq!(vls[1].text, "there"); assert_eq!(vls[1].byte_start, 5); assert!(vls[1].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_empty_line() {
+        let vls = compute_visual_lines("", 5);
+        assert_eq!(vls.len(), 1);
+        assert_eq!(vls[0].text, "");
+        assert!(vls[0].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_multiline_input() {
+        // "hi\nhellothere" width=5 → ["hi"(eol), "hello", "there"(eol)]
+        let vls = compute_visual_lines("hi\nhellothere", 5);
+        assert_eq!(vls.len(), 3);
+        assert_eq!(vls[0].text, "hi");     assert_eq!(vls[0].byte_start, 0); assert!(vls[0].is_eol);
+        assert_eq!(vls[1].text, "hello");  assert_eq!(vls[1].byte_start, 3); assert!(!vls[1].is_eol);
+        assert_eq!(vls[2].text, "there");  assert_eq!(vls[2].byte_start, 8); assert!(vls[2].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_byte_starts_ascii() {
+        // Verify byte_start for each visual line
+        let vls = compute_visual_lines("abc\ndefghi", 3);
+        // "abc"(eol,0) "def"(3+0=3) "ghi"(eol,3+3=6)  wait: "abc\n" = 4 bytes
+        // byte_pos after "abc" = 4; "defghi" starts at byte_pos=4
+        // chars of "defghi": d(0),e(1),f(2),g(3),h(4),i(5)
+        // VL1: "def", byte_start=4+0=4; VL2: "ghi", byte_start=4+3=7
+        assert_eq!(vls[1].byte_start, 4);
+        assert_eq!(vls[2].byte_start, 7);
+    }
+
+    // ── visual_row_and_col ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_visual_row_and_col_start_of_input() {
+        let vls = compute_visual_lines("hello", 5);
+        assert_eq!(visual_row_and_col(0, &vls), (0, 0));
+    }
+
+    #[test]
+    fn test_visual_row_and_col_end_of_line() {
+        let vls = compute_visual_lines("hello", 5);
+        assert_eq!(visual_row_and_col(5, &vls), (0, 5));
+    }
+
+    #[test]
+    fn test_visual_row_and_col_second_visual_row() {
+        // "hellothere" width=5: cursor at byte 7 = 3rd char of "there" → (row=1, col=2)
+        let vls = compute_visual_lines("hellothere", 5);
+        assert_eq!(visual_row_and_col(7, &vls), (1, 2));
+    }
+
+    #[test]
+    fn test_visual_row_and_col_second_logical_line() {
+        // "hi\nworld" width=10: cursor at byte 3 (start of "world") → (row=1, col=0)
+        let vls = compute_visual_lines("hi\nworld", 10);
+        assert_eq!(visual_row_and_col(3, &vls), (1, 0));
+    }
+
+    #[test]
+    fn test_visual_row_and_col_wrap_boundary() {
+        // cursor at byte 5 = start of second visual row of "hellothere" → (1, 0)
+        let vls = compute_visual_lines("hellothere", 5);
+        assert_eq!(visual_row_and_col(5, &vls), (1, 0));
+    }
+
+    // ── cursor_up/down_visual ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cursor_up_visual_between_logical_lines() {
+        // "hello\nworld" width=10: cursor at start of "world" (byte 6) → should go to start of "hello" (byte 0)
+        assert_eq!(cursor_up_visual("hello\nworld", 6, 10), 0);
+    }
+
+    #[test]
+    fn test_cursor_up_visual_across_wrap() {
+        // "hellothere" width=5: visual rows "hello"(row0), "there"(row1)
+        // cursor at byte 7 (col 2 of "there") → should go to col 2 of "hello" = byte 2
+        assert_eq!(cursor_up_visual("hellothere", 7, 5), 2);
+    }
+
+    #[test]
+    fn test_cursor_up_visual_on_first_row_no_op() {
+        assert_eq!(cursor_up_visual("hello", 3, 10), 3);
+    }
+
+    #[test]
+    fn test_cursor_down_visual_between_logical_lines() {
+        // "hello\nworld" width=10: cursor at byte 0 → should go to byte 6 (start of "world")
+        assert_eq!(cursor_down_visual("hello\nworld", 0, 10), 6);
+    }
+
+    #[test]
+    fn test_cursor_down_visual_across_wrap() {
+        // "hellothere" width=5: cursor at byte 2 (col 2 of "hello") → should go to col 2 of "there" = byte 7
+        assert_eq!(cursor_down_visual("hellothere", 2, 5), 7);
+    }
+
+    #[test]
+    fn test_cursor_down_visual_on_last_row_no_op() {
+        assert_eq!(cursor_down_visual("hello", 3, 10), 3);
+    }
+
+    #[test]
+    fn test_cursor_down_visual_clamps_to_short_row() {
+        // "hellothere\nhi" width=5: visual rows: "hello","there","hi"
+        // cursor at col 4 of "there" (byte 9) → should clamp to col 2 of "hi" (byte 13 = 11+2)
+        assert_eq!(cursor_down_visual("hellothere\nhi", 9, 5), 13);
+    }
+
     // ── line_spans ────────────────────────────────────────────────────────────
 
     #[test]
@@ -901,59 +1027,21 @@ mod tests {
     }
 
     #[test]
-    fn test_line_spans_no_cursor_block_character() {
-        // Cursor is rendered by the terminal, not embedded in spans.
-        let spans = line_spans("hello", 0, None);
-        assert!(!spans_text(&spans).contains("█"));
+    fn test_line_spans_no_cursor_block_char() {
+        assert!(!spans_text(&line_spans("hello", 0, None)).contains("█"));
     }
 
     #[test]
-    fn test_line_spans_selection_highlights_middle() {
-        // selection [1..4] = "ell"
+    fn test_line_spans_selection_middle() {
         let spans = line_spans("hello", 0, Some((1, 4)));
         assert_eq!(spans_text(&spans), "hello");
-        let sel = spans.iter().find(|s| s.content.as_ref() == "ell").unwrap();
-        assert!(has_sel_bg(sel));
-        let h = spans.iter().find(|s| s.content.as_ref() == "h").unwrap();
-        assert!(!has_sel_bg(h));
+        assert!(has_sel_bg(spans.iter().find(|s| s.content.as_ref() == "ell").unwrap()));
     }
 
     #[test]
     fn test_line_spans_selection_from_start() {
         let spans = line_spans("hello", 0, Some((0, 3)));
-        assert_eq!(spans_text(&spans), "hello");
-        let sel = spans.iter().find(|s| s.content.as_ref() == "hel").unwrap();
-        assert!(has_sel_bg(sel));
-    }
-
-    #[test]
-    fn test_line_spans_selection_to_end() {
-        let spans = line_spans("hello", 0, Some((3, 5)));
-        assert_eq!(spans_text(&spans), "hello");
-        let sel = spans.iter().find(|s| s.content.as_ref() == "lo").unwrap();
-        assert!(has_sel_bg(sel));
-    }
-
-    #[test]
-    fn test_line_spans_multiline_sel_on_first_line() {
-        // "hello\nworld", selection (3..9): on "hello" (start=0) → sel [3..5]="lo"
-        let spans = line_spans("hello", 0, Some((3, 9)));
-        assert_eq!(spans_text(&spans), "hello");
-        let lo = spans.iter().find(|s| s.content.as_ref() == "lo").unwrap();
-        assert!(has_sel_bg(lo));
-        let hel = spans.iter().find(|s| s.content.as_ref() == "hel").unwrap();
-        assert!(!has_sel_bg(hel));
-    }
-
-    #[test]
-    fn test_line_spans_multiline_sel_on_second_line() {
-        // On "world" (line_start=6): sel covers bytes 6..9 → local [0..3]="wor"
-        let spans = line_spans("world", 6, Some((3, 9)));
-        assert_eq!(spans_text(&spans), "world");
-        let wor = spans.iter().find(|s| s.content.as_ref() == "wor").unwrap();
-        assert!(has_sel_bg(wor));
-        let ld = spans.iter().find(|s| s.content.as_ref() == "ld").unwrap();
-        assert!(!has_sel_bg(ld));
+        assert!(has_sel_bg(spans.iter().find(|s| s.content.as_ref() == "hel").unwrap()));
     }
 
     #[test]
@@ -965,8 +1053,7 @@ mod tests {
 
     #[test]
     fn test_line_spans_empty_line() {
-        let spans = line_spans("", 0, None);
-        assert_eq!(spans_text(&spans), "");
+        assert_eq!(spans_text(&line_spans("", 0, None)), "");
     }
 
     #[test]
@@ -985,15 +1072,13 @@ mod tests {
 
     #[test]
     fn test_non_selected_hunk_has_no_marker() {
-        let mut app = make_app_with_hunks(2);
-        app.selected_hunk = 0;
+        let mut app = make_app_with_hunks(2); app.selected_hunk = 0;
         assert_eq!(text_to_string(&build_diff_text(&app, 1000)).matches("▶").count(), 1);
     }
 
     #[test]
     fn test_selecting_second_hunk_moves_marker() {
-        let mut app = make_app_with_hunks(2);
-        app.selected_hunk = 1;
+        let mut app = make_app_with_hunks(2); app.selected_hunk = 1;
         let content = text_to_string(&build_diff_text(&app, 1000));
         assert_eq!(content.matches("▶").count(), 1);
         let pos = content.find("▶").unwrap();
@@ -1002,8 +1087,7 @@ mod tests {
 
     #[test]
     fn test_non_selected_headers_have_indent() {
-        let mut app = make_app_with_hunks(2);
-        app.selected_hunk = 1;
+        let mut app = make_app_with_hunks(2); app.selected_hunk = 1;
         let text = build_diff_text(&app, 1000);
         let first = text.lines.iter().find(|l| l.spans.iter().any(|s| s.content.contains("@@"))).unwrap();
         assert_eq!(first.spans[0].content.as_ref(), "  ");
@@ -1080,8 +1164,7 @@ mod tests {
 
     #[test]
     fn test_expanded_hunk_shows_context_lines() {
-        let mut app = make_long_context_app();
-        app.expanded_hunks.insert(0);
+        let mut app = make_long_context_app(); app.expanded_hunks.insert(0);
         let c = text_to_string(&build_diff_text(&app, 1000));
         assert!(c.contains("ctx 0") && !c.contains("lines of context"));
     }
@@ -1109,8 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn test_popup_has_no_block_cursor_character() {
-        // The █ character must not appear — cursor is rendered by the terminal.
+    fn test_popup_has_no_block_cursor_char() {
         let mut app = make_app_with_hunks(1);
         app.mode = Mode::Comment { hunk_idx: 0, input: "hello world".to_string(), cursor: 5, original: None };
         assert!(!popup_rendered(&app).contains("█"));
@@ -1157,35 +1239,35 @@ mod tests {
     }
 
     #[test]
-    fn test_status_bar_comment_mode_mentions_clipboard() {
+    fn test_status_bar_comment_mentions_clipboard() {
         let mut app = app_diff_view();
         app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
         assert!(status_bar_text(&app).contains("Ctrl+C/V/X"));
     }
 
     #[test]
-    fn test_status_bar_comment_mode_mentions_selection() {
+    fn test_status_bar_comment_mentions_selection() {
         let mut app = app_diff_view();
         app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
         assert!(status_bar_text(&app).contains("Shift+arrows"));
     }
 
     #[test]
-    fn test_status_bar_file_list_panel() {
+    fn test_status_bar_file_list() {
         let mut app = app_diff_view(); app.focused_panel = Panel::FileList;
         let text = status_bar_text(&app);
         assert!(text.contains("Tab") && text.contains("Enter: open"));
     }
 
     #[test]
-    fn test_status_bar_notes_view_panel() {
+    fn test_status_bar_notes_view() {
         let mut app = app_diff_view(); app.focused_panel = Panel::NotesView;
         let text = status_bar_text(&app);
         assert!(text.contains("Enter: jump") && text.contains("e: edit") && text.contains("d: delete"));
     }
 
     #[test]
-    fn test_status_bar_diff_no_notes_shows_comment_action() {
+    fn test_status_bar_diff_no_notes() {
         assert!(status_bar_text(&app_diff_view()).contains("c: comment"));
     }
 
@@ -1209,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_status_bar_diff_hunk_with_note_shows_edit_delete() {
+    fn test_status_bar_diff_note_shows_edit_delete() {
         let mut app = app_diff_view();
         app.mode = Mode::Comment { hunk_idx: 0, input: "existing".to_string(), cursor: 0, original: None };
         app.submit_comment();
@@ -1218,12 +1300,12 @@ mod tests {
     }
 
     #[test]
-    fn test_status_bar_foldable_hunk_shows_expand() {
+    fn test_status_bar_foldable_shows_expand() {
         assert!(status_bar_text(&make_long_context_app()).contains("Space: expand"));
     }
 
     #[test]
-    fn test_status_bar_expanded_hunk_shows_fold() {
+    fn test_status_bar_expanded_shows_fold() {
         let mut app = make_long_context_app(); app.expanded_hunks.insert(0);
         assert!(status_bar_text(&app).contains("Space: fold"));
     }
@@ -1264,7 +1346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_notes_panel_expanded_note_shows_full_text() {
+    fn test_notes_panel_expanded_shows_full_text() {
         let long = "a".repeat(80);
         let mut app = app_with_note(&long); app.expanded_notes.insert(0);
         let rendered = notes_panel_rendered(&app);
@@ -1272,39 +1354,23 @@ mod tests {
     }
 
     #[test]
-    fn test_notes_panel_selected_note_has_marker() {
+    fn test_notes_panel_selected_has_marker() {
         assert!(notes_panel_rendered(&app_with_note("my note")).contains("▶"));
     }
 
     #[test]
-    fn test_notes_panel_shows_hunk_header_in_item() {
-        assert!(notes_panel_rendered(&app_with_note("some note")).contains("@@"));
+    fn test_notes_panel_shows_hunk_header() {
+        assert!(notes_panel_rendered(&app_with_note("note")).contains("@@"));
     }
 
-    // ── Cursor movement ───────────────────────────────────────────────────────
+    // ── cursor movement helpers ───────────────────────────────────────────────
 
-    #[test] fn test_cursor_up_previous_line_start()   { assert_eq!(cursor_up("hello\nworld", 6), 0); }
-    #[test] fn test_cursor_up_preserves_column()      { assert_eq!(cursor_up("hello\nworld", 8), 2); }
-    #[test] fn test_cursor_up_clamps_short_line()     { assert_eq!(cursor_up("hi\nworld", 7), 2); }
-    #[test] fn test_cursor_up_first_line_no_op()      { assert_eq!(cursor_up("hello\nworld", 3), 3); }
-
-    #[test] fn test_cursor_down_next_line_same_col()  { assert_eq!(cursor_down("hello\nworld", 0), 6); }
-    #[test] fn test_cursor_down_preserves_column()    { assert_eq!(cursor_down("hello\nworld", 3), 9); }
-    #[test] fn test_cursor_down_clamps_column()       { assert_eq!(cursor_down("hello\nhi", 4), 8); }
-    #[test] fn test_cursor_down_last_line_no_op()     { assert_eq!(cursor_down("hello\nworld", 8), 8); }
-
-    #[test] fn test_cursor_home_moves_to_start()      { assert_eq!(cursor_home("hello\nworld", 9), 6); }
-    #[test] fn test_cursor_home_first_line()          { assert_eq!(cursor_home("hello", 3), 0); }
-    #[test] fn test_cursor_home_already_at_start()    { assert_eq!(cursor_home("hello\nworld", 6), 6); }
-
-    #[test] fn test_cursor_end_moves_to_end()         { assert_eq!(cursor_end("hello\nworld", 0), 5); }
-    #[test] fn test_cursor_end_last_line()            { assert_eq!(cursor_end("hello\nworld", 8), 11); }
-    #[test] fn test_cursor_end_already_at_end()       { assert_eq!(cursor_end("hello\nworld", 5), 5); }
-
-    #[test] fn test_word_left_to_word_start()         { assert_eq!(cursor_word_left("foo bar baz", 11), 8); }
-    #[test] fn test_word_left_skips_whitespace()      { assert_eq!(cursor_word_left("foo bar", 4), 0); }
-    #[test] fn test_word_left_at_start_no_op()        { assert_eq!(cursor_word_left("foo bar", 0), 0); }
-    #[test] fn test_word_right_past_word_and_space()  { assert_eq!(cursor_word_right("foo bar baz", 0), 4); }
-    #[test] fn test_word_right_from_middle()          { assert_eq!(cursor_word_right("foo bar", 1), 4); }
-    #[test] fn test_word_right_at_end_no_op()         { assert_eq!(cursor_word_right("foo bar", 7), 7); }
+    #[test] fn test_cursor_home_moves_to_start()    { assert_eq!(cursor_home("hello\nworld", 9), 6); }
+    #[test] fn test_cursor_home_first_line()        { assert_eq!(cursor_home("hello", 3), 0); }
+    #[test] fn test_cursor_end_moves_to_end()       { assert_eq!(cursor_end("hello\nworld", 0), 5); }
+    #[test] fn test_cursor_end_last_line()          { assert_eq!(cursor_end("hello\nworld", 8), 11); }
+    #[test] fn test_word_left_to_word_start()       { assert_eq!(cursor_word_left("foo bar baz", 11), 8); }
+    #[test] fn test_word_left_skips_whitespace()    { assert_eq!(cursor_word_left("foo bar", 4), 0); }
+    #[test] fn test_word_right_past_word_and_space(){ assert_eq!(cursor_word_right("foo bar baz", 0), 4); }
+    #[test] fn test_word_right_from_middle()        { assert_eq!(cursor_word_right("foo bar", 1), 4); }
 }
