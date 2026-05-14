@@ -62,6 +62,9 @@ pub struct App {
     /// Byte offset of the selection anchor; `None` means no active selection.
     /// The selected range is `min(cursor, anchor)..max(cursor, anchor)`.
     pub comment_anchor: Option<usize>,
+    /// Scroll offset (visual rows) for the notes panel. Updated after every navigation action
+    /// so the selected note is always visible within the panel viewport.
+    pub notes_scroll: usize,
     /// Inner width of the diff panel (terminal columns, excluding file-list panel and borders).
     /// Updated by the event loop before each draw. Used to compute accurate visual row counts
     /// when wrap is enabled. Zero means "no wrap accounting" (treats every line as 1 row).
@@ -88,6 +91,7 @@ impl App {
             expanded_notes: HashSet::new(),
             comment_scroll: 0,
             comment_anchor: None,
+            notes_scroll: 0,
             diff_view_content_width: 0,
         }
     }
@@ -115,6 +119,24 @@ impl App {
         }
     }
 
+    /// Adjust `notes_scroll` so the selected note is within the viewport.
+    /// `viewport_height` is the inner content height of the notes panel (panel rows − 2 borders).
+    pub fn scroll_notes_to_selected(&mut self, viewport_height: usize) {
+        if self.notes.is_empty() || viewport_height == 0 { return; }
+        let note_start: usize = self.notes[..self.selected_note].iter().enumerate()
+            .map(|(i, n)| note_visual_rows(n, self.expanded_notes.contains(&i)))
+            .sum();
+        let note_h = note_visual_rows(
+            &self.notes[self.selected_note],
+            self.expanded_notes.contains(&self.selected_note),
+        );
+        if note_start < self.notes_scroll {
+            self.notes_scroll = note_start;
+        } else if note_start + note_h > self.notes_scroll + viewport_height {
+            self.notes_scroll = (note_start + note_h).saturating_sub(viewport_height);
+        }
+    }
+
     pub fn toggle_note_expand(&mut self) {
         if self.expanded_notes.contains(&self.selected_note) {
             self.expanded_notes.remove(&self.selected_note);
@@ -131,11 +153,10 @@ impl App {
 
     /// Deletes the note currently selected in the Notes panel.
     pub fn delete_selected_note(&mut self) {
-        if self.selected_note >= self.notes.len() {
-            return;
-        }
+        if self.selected_note >= self.notes.len() { return; }
         self.notes.remove(self.selected_note);
         self.expanded_notes.clear();
+        self.notes_scroll = 0;
         if self.selected_note > 0 && self.selected_note >= self.notes.len() {
             self.selected_note -= 1;
         }
@@ -277,6 +298,7 @@ impl App {
         let Some((file, header)) = self.current_hunk_identity() else { return };
         self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
         self.expanded_notes.clear();
+        self.notes_scroll = 0;
         if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
             self.selected_note = self.notes.len() - 1;
         }
@@ -370,6 +392,17 @@ impl App {
         self.comment_scroll = 0;
         self.comment_anchor = None;
         self.mode = Mode::Normal;
+    }
+}
+
+/// Visual rows occupied by one note entry in the notes panel.
+/// Collapsed: header + first-line-of-note + blank = 3 rows.
+/// Expanded: header + all note lines + blank.
+fn note_visual_rows(note: &FeedbackNote, expanded: bool) -> usize {
+    if expanded {
+        1 + note.note.lines().count().max(1) + 1
+    } else {
+        3
     }
 }
 
@@ -1254,6 +1287,77 @@ mod tests {
         let mut app = app_with_two_file_notes();
         app.notes_up();
         assert_eq!(app.selected_note, 0);
+    }
+
+    // ── Notes panel scrolling ────────────────────────────────────────────────
+
+    fn app_with_many_notes(n: usize) -> App {
+        let mut app = app_with_diff(3);
+        for hunk_idx in 0..n.min(3) {
+            app.selected_hunk = hunk_idx;
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0, original: None };
+            app.submit_comment();
+        }
+        app.selected_note = 0;
+        app
+    }
+
+    #[test]
+    fn test_scroll_notes_no_op_when_selected_visible() {
+        let mut app = app_with_many_notes(2);
+        app.selected_note = 0;
+        app.scroll_notes_to_selected(8); // both notes fit in 8 rows (3 rows each)
+        assert_eq!(app.notes_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_notes_scrolls_down_when_below_viewport() {
+        let mut app = app_with_many_notes(3);
+        // 3 collapsed notes = 9 visual rows; viewport=6 can show 2 notes
+        app.selected_note = 2; // note 2 starts at row 6
+        app.scroll_notes_to_selected(6);
+        // note 2 ends at row 9, viewport=6 → scroll = 9-6 = 3
+        assert_eq!(app.notes_scroll, 3);
+    }
+
+    #[test]
+    fn test_scroll_notes_scrolls_up_when_above_viewport() {
+        let mut app = app_with_many_notes(3);
+        app.notes_scroll = 6; // viewport shows rows 6+
+        app.selected_note = 0; // note 0 starts at row 0
+        app.scroll_notes_to_selected(6);
+        assert_eq!(app.notes_scroll, 0);
+    }
+
+    #[test]
+    fn test_note_visual_rows_collapsed() {
+        let note = FeedbackNote {
+            file: std::path::PathBuf::from("src/foo.rs"),
+            hunk_header: "@@ -1,1 +1,1 @@".to_string(),
+            hunk_content: String::new(),
+            note: "single line".to_string(),
+        };
+        assert_eq!(note_visual_rows(&note, false), 3);
+    }
+
+    #[test]
+    fn test_note_visual_rows_expanded_multiline() {
+        let note = FeedbackNote {
+            file: std::path::PathBuf::from("src/foo.rs"),
+            hunk_header: "@@ -1,1 +1,1 @@".to_string(),
+            hunk_content: String::new(),
+            note: "line one\nline two\nline three".to_string(),
+        };
+        // header(1) + 3 lines + blank(1) = 5
+        assert_eq!(note_visual_rows(&note, true), 5);
+    }
+
+    #[test]
+    fn test_delete_selected_note_resets_scroll() {
+        let mut app = app_with_many_notes(2);
+        app.notes_scroll = 3;
+        app.delete_selected_note();
+        assert_eq!(app.notes_scroll, 0);
     }
 
     #[test]

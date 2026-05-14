@@ -129,7 +129,7 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Up => match app.focused_panel {
                         Panel::FileList  => app.file_list_up(),
                         Panel::DiffView  => app.diff_scroll_up(),
-                        Panel::NotesView => app.notes_up(),
+                        Panel::NotesView => { app.notes_up(); app.scroll_notes_to_selected(8); }
                     },
                     KeyCode::Down => match app.focused_panel {
                         Panel::FileList  => app.file_list_down(),
@@ -137,7 +137,7 @@ fn run_event_loop<G: GitBackend>(
                             let vp = terminal.size().map(|r| r.height.saturating_sub(3) as usize).unwrap_or(20);
                             app.diff_scroll_down(vp);
                         }
-                        Panel::NotesView => app.notes_down(),
+                        Panel::NotesView => { app.notes_down(); app.scroll_notes_to_selected(8); }
                     },
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
@@ -152,7 +152,7 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('c') => { if app.focused_panel == Panel::DiffView { app.start_comment(); } }
                     KeyCode::Char(' ') => match app.focused_panel {
                         Panel::DiffView  => app.toggle_hunk_fold(),
-                        Panel::NotesView => app.toggle_note_expand(),
+                        Panel::NotesView => { app.toggle_note_expand(); app.scroll_notes_to_selected(8); }
                         _ => {}
                     },
                     KeyCode::Char('e') => match app.focused_panel {
@@ -435,6 +435,7 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
             .border_type(border_type)
             .style(Style::default().bg(app.highlighter.panel_bg))
             .title(format!(" Notes ({}) ", app.notes.len())))
+        .scroll((app.notes_scroll as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
