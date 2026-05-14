@@ -99,6 +99,11 @@ fn run_event_loop<G: GitBackend>(
     git: &G,
 ) -> Result<()> {
     loop {
+        // Keep diff_view_content_width in sync so scroll accounting matches the
+        // wrapped rendering: files panel (32) + diff borders (2) + gutter (6) = 40.
+        if let Ok(s) = terminal.size() {
+            app.diff_view_content_width = (s.width as usize).saturating_sub(40);
+        }
         terminal.draw(|f| render(f, app))?;
         let Event::Key(key) = event::read()? else { continue; };
         if key.kind != KeyEventKind::Press { continue; }
@@ -377,7 +382,8 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
             .border_type(border_type)
             .style(Style::default().bg(app.highlighter.panel_bg))
             .title(title))
-        .scroll((app.diff_scroll as u16, 0));
+        .scroll((app.diff_scroll as u16, 0))
+        .wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 

@@ -32,7 +32,7 @@ Press `Space` to expand a folded region; press `Space` again to fold it back. Th
 
 ### Line wrapping
 
-Long lines **do not wrap** — they clip at the panel edge. This keeps line numbers and the gutter visually aligned and matches how `git diff` behaves in a terminal. There is no horizontal scrolling; content past the panel edge is not accessible. If horizontal scrolling is ever desired, `Paragraph::scroll((v, h))` already supports it — it just needs a `diff_hscroll` value in `App` and a keybind.
+Long lines wrap at the panel boundary (`Wrap { trim: false }`). The gutter (line number + prefix) appears on the first visual row; continuation rows start at the left edge with no indent. There is no horizontal scrolling. The scroll accounting tracks visual rows (after wrapping) so hunk navigation and scroll-cap remain accurate regardless of line length.
 
 ---
 

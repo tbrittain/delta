@@ -62,6 +62,10 @@ pub struct App {
     /// Byte offset of the selection anchor; `None` means no active selection.
     /// The selected range is `min(cursor, anchor)..max(cursor, anchor)`.
     pub comment_anchor: Option<usize>,
+    /// Inner width of the diff panel (terminal columns, excluding file-list panel and borders).
+    /// Updated by the event loop before each draw. Used to compute accurate visual row counts
+    /// when wrap is enabled. Zero means "no wrap accounting" (treats every line as 1 row).
+    pub diff_view_content_width: usize,
 }
 
 impl App {
@@ -84,6 +88,7 @@ impl App {
             expanded_notes: HashSet::new(),
             comment_scroll: 0,
             comment_anchor: None,
+            diff_view_content_width: 0,
         }
     }
 
@@ -199,36 +204,36 @@ impl App {
     /// Accounts for folded context runs so hunk-jump scrolls to the right position.
     fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
+        let pw = self.diff_view_content_width;
         let mut offset = 0;
         for (i, hunk) in diff.hunks.iter().enumerate() {
-            if i >= target_hunk {
-                break;
-            }
+            if i >= target_hunk { break; }
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                hunk.lines.len()
+                hunk.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
             } else {
-                context_run_visual_lines(&hunk.lines)
+                context_run_visual_lines(&hunk.lines, pw)
             };
             let note_count = self.notes
                 .iter()
                 .filter(|n| n.file == diff.file.path && n.hunk_header == hunk.header)
                 .count();
-            offset += 1 + content_lines + note_count + 1; // header + lines + notes + blank
+            offset += 1 + content_lines + note_count + 1;
         }
         offset
     }
 
     /// Total rendered line count for the current diff, used to cap scroll.
-    /// Accounts for folded context runs.
+    /// Accounts for folded context runs and per-line visual row counts when wrap is on.
     fn diff_content_lines(&self) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
+        let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                h.lines.len()
+                h.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
             } else {
-                context_run_visual_lines(&h.lines)
+                context_run_visual_lines(&h.lines, pw)
             };
             let note_count = self.notes
                 .iter()
@@ -368,9 +373,21 @@ impl App {
     }
 }
 
+/// Number of visual (screen) rows a single diff line occupies when the diff panel
+/// wraps at `panel_width` columns. `panel_width` is the full inner width of the diff
+/// panel including the 6-column gutter (4 lineno + 1 space + 1 prefix).
+/// Returns 1 when `panel_width` is 0 (wrap accounting disabled).
+pub(crate) fn visual_rows_for_diff_line(content: &str, panel_width: usize) -> usize {
+    if panel_width == 0 { return 1; }
+    let total = 6 + content.chars().count(); // gutter always occupies 6 chars on the first row
+    (total + panel_width - 1) / panel_width
+}
+
 /// Count the visual lines a slice of diff lines occupies when context runs are folded.
 /// Runs of context lines >= FOLD_THRESHOLD collapse to a single placeholder line.
-fn context_run_visual_lines(lines: &[DiffLine]) -> usize {
+/// `panel_width` is passed to `visual_rows_for_diff_line` for non-context (changed) lines;
+/// context lines are assumed short and counted as 1 row each.
+fn context_run_visual_lines(lines: &[DiffLine], panel_width: usize) -> usize {
     let mut count = 0;
     let mut ctx_run = 0;
     for line in lines {
@@ -379,7 +396,7 @@ fn context_run_visual_lines(lines: &[DiffLine]) -> usize {
         } else {
             count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
             ctx_run = 0;
-            count += 1;
+            count += visual_rows_for_diff_line(&line.content, panel_width);
         }
     }
     count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
@@ -1083,13 +1100,13 @@ mod tests {
     fn test_context_run_visual_lines_short_run_shown_as_is() {
         // 3 context lines < FOLD_THRESHOLD — should count as 3, not 1
         let lines = make_lines(&[LineKind::Context; 3]);
-        assert_eq!(context_run_visual_lines(&lines), 3);
+        assert_eq!(context_run_visual_lines(&lines, 0), 3);
     }
 
     #[test]
     fn test_context_run_visual_lines_long_run_folds_to_one() {
         let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
-        assert_eq!(context_run_visual_lines(&lines), 1);
+        assert_eq!(context_run_visual_lines(&lines, 0), 1);
     }
 
     #[test]
@@ -1102,7 +1119,7 @@ mod tests {
         kinds.push(LineKind::Added);
         let lines = make_lines(&kinds);
         // visual: 1 + 2 + 1 + 1(fold) + 1 = 6
-        assert_eq!(context_run_visual_lines(&lines), 6);
+        assert_eq!(context_run_visual_lines(&lines, 0), 6);
     }
 
     #[test]
@@ -1115,6 +1132,65 @@ mod tests {
     fn test_hunk_has_foldable_context_true_at_threshold() {
         let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
         assert!(hunk_has_foldable_context(&lines));
+    }
+
+    // ── visual_rows_for_diff_line ─────────────────────────────────────────────
+
+    #[test]
+    fn test_visual_rows_zero_width_returns_one() {
+        assert_eq!(visual_rows_for_diff_line("long line content", 0), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_short_line_fits_in_one_row() {
+        // gutter=6, content=10 → total=16 ≤ panel_width=80 → 1 row
+        assert_eq!(visual_rows_for_diff_line("0123456789", 80), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_exactly_fills_panel() {
+        // total = 6 + 74 = 80 chars, panel=80 → 1 row
+        let content = "x".repeat(74);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 1);
+    }
+
+    #[test]
+    fn test_visual_rows_one_char_over_wraps_to_two() {
+        // total = 6 + 75 = 81 chars, panel=80 → 2 rows
+        let content = "x".repeat(75);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 2);
+    }
+
+    #[test]
+    fn test_visual_rows_double_panel_width_gives_two_rows() {
+        // total = 6 + 154 = 160 chars, panel=80 → 2 rows
+        let content = "x".repeat(154);
+        assert_eq!(visual_rows_for_diff_line(&content, 80), 2);
+    }
+
+    #[test]
+    fn test_visual_rows_context_line_accounting_in_scroll() {
+        // Verify diff_content_lines accounts for wrap when diff_view_content_width is set.
+        // Three hunks, each with one added line of 75 chars (would wrap at panel_width=80).
+        use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+        let mut app = app_with_diff(0);
+        let long_content = "x".repeat(75); // wraps to 2 visual rows at panel_width=80
+        app.current_diff = Some(DiffFile {
+            file: make_files(1).remove(0),
+            hunks: vec![Hunk {
+                header: "@@ -1,1 +1,1 @@".to_string(),
+                old_start: 1, new_start: 1,
+                lines: vec![DiffLine {
+                    old_lineno: None, new_lineno: Some(1),
+                    kind: LineKind::Added, content: long_content,
+                }],
+            }],
+        });
+        // Without wrap accounting: 1 hunk = 1(header) + 1(line) + 0(notes) + 1(blank) = 3
+        assert_eq!(app.diff_content_lines(), 3);
+        // With wrap accounting: 1(header) + 2(visual rows) + 0 + 1 = 4
+        app.diff_view_content_width = 80;
+        assert_eq!(app.diff_content_lines(), 4);
     }
 
     #[test]
