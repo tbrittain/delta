@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 
@@ -136,7 +136,7 @@ fn run_event_loop<G: GitBackend>(
                             let viewport = terminal.size()
                                 .map(|r| r.height.saturating_sub(3) as usize)
                                 .unwrap_or(20);
-                            app.scroll_to_show_comment_input(viewport);
+                            app.scroll_to_show_comment_cursor(viewport);
                         }
                     }
                     KeyCode::Char(' ') => match app.focused_panel {
@@ -150,7 +150,7 @@ fn run_event_loop<G: GitBackend>(
                             let viewport = terminal.size()
                                 .map(|r| r.height.saturating_sub(3) as usize)
                                 .unwrap_or(20);
-                            app.scroll_to_show_comment_input(viewport);
+                            app.scroll_to_show_comment_cursor(viewport);
                         }
                         Panel::NotesView => {
                             jump_to_note(app, git);
@@ -187,6 +187,10 @@ fn run_event_loop<G: GitBackend>(
                     input.insert(cursor, '\n');
                     cursor += 1;
                     app.mode = Mode::Comment { hunk_idx, input, cursor, original };
+                    let viewport = terminal.size()
+                        .map(|r| r.height.saturating_sub(3) as usize)
+                        .unwrap_or(20);
+                    app.scroll_to_show_comment_cursor(viewport);
                 }
                 KeyCode::Left => {
                     cursor = cursor_prev(&input, cursor);
@@ -241,10 +245,10 @@ fn render(frame: &mut Frame, app: &App) {
 
 fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == Panel::FileList;
-    let border_style = if focused {
-        Style::default().fg(Color::Blue)
+    let (border_style, border_type) = if focused {
+        (Style::default(), BorderType::Double)
     } else {
-        Style::default().fg(Color::DarkGray)
+        (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
 
     let items: Vec<ListItem> = app
@@ -262,7 +266,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                 FileStatus::Renamed => Color::Cyan,
             };
             let base_style = if i == app.selected_file {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default().add_modifier(Modifier::REVERSED).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -285,6 +289,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
+            .border_type(border_type)
             .title(title),
     );
 
@@ -295,10 +300,10 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == Panel::DiffView;
-    let border_style = if focused {
-        Style::default().fg(Color::Blue)
+    let (border_style, border_type) = if focused {
+        (Style::default(), BorderType::Double)
     } else {
-        Style::default().fg(Color::DarkGray)
+        (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
 
     let title = {
@@ -322,6 +327,7 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(border_style)
+                .border_type(border_type)
                 .title(title),
         )
         .scroll((app.diff_scroll as u16, 0))
@@ -811,7 +817,7 @@ fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
     let para = Paragraph::new(Text::from(lines)).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue))
+            .border_type(BorderType::Double)
             .title(title),
     );
     frame.render_widget(para, area);
@@ -860,7 +866,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         },
     };
 
-    let style = Style::default().bg(Color::Blue).fg(Color::White);
+    let style = Style::default().add_modifier(Modifier::REVERSED);
     let bar = Paragraph::new(text).style(style);
     frame.render_widget(bar, area);
 }
