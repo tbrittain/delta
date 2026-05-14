@@ -44,16 +44,14 @@ Long lines **do not wrap** — they clip at the panel edge. This keeps line numb
 - `git diff -w` — ignores all whitespace; lines differing only in spacing become invisible.
 - `git diff -b` — ignores whitespace *changes* but not the presence/absence of whitespace. Less aggressive than `-w`.
 
-**UX:** `w` key cycles `none → -b → -w → none`. The active flag appears in the diff panel title. Changing it re-fetches the file diff with the flag appended to the `git diff` invocation.
-
-**Implementation:** `GitBackend::file_diff` needs an optional flags parameter. `App` carries a `WhitespaceMode` enum. Integration tests needed for each mode against a whitespace-only-change fixture.
+**UX:** `w` key cycles `none → -b → -w → none`. The active flag appears in the diff panel title. Changing it re-fetches the file diff with the flag appended to the `git diff` invocation. See `git-integration.md` for the backend changes needed.
 
 ### Full-file view with collapsed gaps
 **Goal:** View the entire file, not just the changed hunks. Unchanged sections between hunks collapse by default with a line-count placeholder; expanding one loads those lines from git.
 
 **Current:** Context folding already works *within* a hunk. This extends the same concept to *gaps between hunks*, which are currently invisible.
 
-**Implementation:** Needs a new `GitBackend` method to fetch arbitrary line ranges (`git show <ref>:<path>` + line extraction). Default view stays diff-only; full-file is opt-in per file. On Windows, use a Rust line-range extractor rather than shell tools for portability.
+Default view stays diff-only; full-file is opt-in per file. See `git-integration.md` for the backend method needed to fetch arbitrary line ranges.
 
 ### Find in diff (Ctrl+F, diff view focused)
 **Goal:** Incremental text search over the visible diff content. Matches are highlighted; `n` / `N` jumps between them. `Esc` clears.
