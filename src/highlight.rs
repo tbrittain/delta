@@ -25,11 +25,9 @@ impl SyntaxHighlighter {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
         let theme = theme_set.themes["base16-ocean.dark"].clone();
-        let panel_bg = theme
-            .settings
-            .background
-            .map(|c| Color::Rgb(c.r, c.g, c.b))
-            .unwrap_or(Color::Rgb(43, 48, 59));
+        // Darker than the theme's own background so the panel feels closer to a
+        // proper dark editor pane rather than the theme's medium-dark default.
+        let panel_bg = Color::Rgb(18, 20, 26);
         Self { syntax_set, theme, panel_bg }
     }
 

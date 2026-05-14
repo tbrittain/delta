@@ -292,6 +292,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_style(border_style)
             .border_type(border_type)
+            .style(Style::default().bg(app.highlighter.panel_bg))
             .title(title),
     );
 
