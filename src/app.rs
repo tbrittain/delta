@@ -161,7 +161,9 @@ impl App {
         let tree = self.tree_items();
         if let Some(item) = tree.get(self.file_tree_cursor) {
             if let Some(idx) = item.file_idx() {
-                self.selected_file = idx;
+                if idx != self.selected_file {
+                    self.select_file(idx);
+                }
             }
         }
     }
@@ -700,6 +702,18 @@ mod tests {
         app.select_file(0);
         assert_eq!(app.diff_scroll, 0);
         assert_eq!(app.selected_hunk, 0);
+    }
+
+    #[test]
+    fn test_file_list_down_resets_diff_scroll_on_file_change() {
+        // Regression: navigating away from a deeply scrolled file with ↑/↓ left
+        // diff_scroll at the old value, making a shorter file appear empty.
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.diff_scroll = 50;
+        app.selected_hunk = 2;
+        app.file_list_down();
+        assert_eq!(app.diff_scroll, 0, "diff_scroll should reset when navigating to a new file");
+        assert_eq!(app.selected_hunk, 0, "selected_hunk should reset when navigating to a new file");
     }
 
     // ── Hunk navigation ───────────────────────────────────────────────────────
