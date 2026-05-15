@@ -116,14 +116,14 @@ The diff view always uses soft word wrap (`Wrap { trim: false }`). There is no w
 
 ---
 
-### Syntax highlighting missing for JSX/TSX and other framework-specific extensions
+### Syntax highlighting missing for TypeScript and JSX/TSX
 
-`syntect` ships with Sublime Text grammar bundles. These include `.js` and `.ts` but not `.jsx` or `.tsx`. Files with those extensions fall back to plain text (no token colours).
+`syntect`'s default grammar set is the built-in Sublime Text bundle. TypeScript is a third-party Sublime package and is **not** included. As a result `.ts`, `.tsx`, and `.jsx` all fall back to plain text — no token colours at all, even for plain TypeScript files.
 
-**Affected extensions observed:** `.jsx`, `.tsx`. Other framework-specific extensions (`.vue`, `.svelte`) are likely in the same situation.
+**Affected extensions confirmed:** `.ts`, `.tsx`, `.jsx`. `.vue` and `.svelte` are almost certainly in the same situation.
 
 **Possible directions:**
-- Bundle additional Sublime Text grammars for JSX/TSX (available from the `babel-sublime` and `TypeScript-TmLanguage` packages) and compile them into the binary via `syntect`'s `build.rs` dump approach.
-- Extend the extension → language map to alias `.jsx` → JavaScript and `.tsx` → TypeScript, accepting that JSX-specific syntax (angle brackets, etc.) will not be highlighted perfectly but at least keyword/string highlighting will apply.
+- Bundle additional Sublime Text grammars (TypeScript from `TypeScript-TmLanguage`, JSX from `babel-sublime`) and compile them into the binary at build time via `syntect`'s `build.rs` dump mechanism.
+- Extend the extension → language map to alias `.ts` → JavaScript and `.tsx`/`.jsx` → JavaScript as a quick fallback; highlights will be approximate but better than nothing.
 
-**Priority:** Common for front-end codebases. The alias approach (second option) is a low-effort improvement that can land quickly; full grammar bundles are higher quality but require build-time work.
+**Priority:** High for front-end codebases. The alias approach is a one-liner improvement; full grammar bundling is higher quality but requires build-time work and binary size consideration.

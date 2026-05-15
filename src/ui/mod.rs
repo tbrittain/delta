@@ -140,6 +140,16 @@ fn run_event_loop<G: GitBackend>(
                         }
                         Panel::NotesView => { app.notes_down(); app.scroll_notes_to_selected(8); }
                     },
+                    KeyCode::Left => {
+                        if app.focused_panel == Panel::FileList {
+                            app.file_list_scroll_left();
+                        }
+                    }
+                    KeyCode::Right => {
+                        if app.focused_panel == Panel::FileList {
+                            app.file_list_scroll_right();
+                        }
+                    }
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
                             let is_dir = app.tree_items().get(app.file_tree_cursor)
@@ -148,7 +158,6 @@ fn run_event_loop<G: GitBackend>(
                                 app.toggle_dir_at_cursor();
                             } else {
                                 load_current_file(app, git);
-                                app.focused_panel = Panel::DiffView;
                             }
                         } else if app.focused_panel == Panel::NotesView {
                             jump_to_note(app, git);
@@ -334,16 +343,25 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
+    let h_scroll = app.file_list_h_scroll;
+    let inner_width = area.width.saturating_sub(2) as usize;
     let tree = app.tree_items();
     let items: Vec<ListItem> = tree.iter().map(|item| {
-        let indent = "  ".repeat(item.depth());
+        let depth = item.depth();
+        let indent = "  ".repeat(depth);
+        let indent_width = depth * 2;
         match item {
             TreeItem::Dir { display_name, file_count, collapsed, has_notes, .. } => {
                 let arrow = if *collapsed { "▸" } else { "▾" };
                 let note_marker = if *has_notes { " ●" } else { "" };
+                // Fixed prefix: indent + arrow + " " (arrow is 1 display cell)
+                let prefix_width = indent_width + 2;
+                let avail = inner_width.saturating_sub(prefix_width);
+                let content = format!("{} ({}){}", display_name, file_count, note_marker);
+                let visible = hscroll_str(&content, h_scroll, avail);
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{}{} ", indent, arrow), Style::default().fg(ACCENT)),
-                    Span::raw(format!("{} ({}){}", display_name, file_count, note_marker)),
+                    Span::raw(visible),
                 ]))
             }
             TreeItem::File { file_idx, display_name, has_notes, .. } => {
@@ -355,10 +373,15 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     FileStatus::Deleted  => Color::Red,
                     FileStatus::Renamed  => Color::Cyan,
                 };
+                // Fixed prefix: indent + "[M] " (4 chars: bracket, letter, bracket, space)
+                let prefix_width = indent_width + 4;
+                let avail = inner_width.saturating_sub(prefix_width);
+                let content = format!("{}{}", display_name, note_marker);
+                let visible = hscroll_str(&content, h_scroll, avail);
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
-                    Span::styled(format!("[{}]", f.status.indicator()), Style::default().fg(status_color)),
-                    Span::raw(format!(" {}{}", display_name, note_marker)),
+                    Span::styled(format!("[{}] ", f.status.indicator()), Style::default().fg(status_color)),
+                    Span::raw(visible),
                 ]))
             }
         }
@@ -475,11 +498,16 @@ fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
     app.focused_panel = Panel::DiffView;
 }
 
+/// Return the substring of `s` starting at character offset `skip`, capped to `max` characters.
+fn hscroll_str(s: &str, skip: usize, max: usize) -> String {
+    s.chars().skip(skip).take(max).collect()
+}
+
 fn status_bar_text(app: &App) -> String {
     match app.mode {
         Mode::Comment { .. } => " Ctrl+S: submit   Ctrl+C/V/X: copy/paste/cut   Shift+arrows: select   Esc: cancel".to_string(),
         Mode::Normal => match app.focused_panel {
-            Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: items  Enter/Space: open/toggle  q: quit".to_string(),
+            Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: items  ←/→: scroll names  Enter/Space: open/toggle  q: quit".to_string(),
             Panel::NotesView => " Tab/Shift+Tab: navigate  ↑↓: notes  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string(),
             Panel::DiffView  => {
                 let note_count = app.notes.len();
@@ -871,5 +899,20 @@ mod tests {
         let mut app = app_with_tree_files();
         app.focused_panel = Panel::FileList;
         assert!(status_bar_text(&app).contains("toggle"));
+    }
+
+    #[test]
+    fn test_status_bar_file_list_mentions_scroll() {
+        let mut app = app_with_tree_files();
+        app.focused_panel = Panel::FileList;
+        assert!(status_bar_text(&app).contains("scroll"));
+    }
+
+    #[test]
+    fn test_hscroll_str_skips_and_caps() {
+        assert_eq!(hscroll_str("hello world", 6, 5), "world");
+        assert_eq!(hscroll_str("hello world", 0, 5), "hello");
+        assert_eq!(hscroll_str("hi", 10, 5), "");
+        assert_eq!(hscroll_str("hello", 0, 100), "hello");
     }
 }

@@ -74,6 +74,9 @@ pub struct App {
     pub collapsed_dirs: HashSet<PathBuf>,
     /// Cursor position within the visible file tree (index into `tree_items()`).
     pub file_tree_cursor: usize,
+    /// Horizontal scroll offset (in character columns) for the scrollable name portion
+    /// of file-list items. Adjusted with ←/→ when the file-list panel is focused.
+    pub file_list_h_scroll: usize,
 }
 
 impl App {
@@ -100,6 +103,7 @@ impl App {
             diff_view_content_width: 0,
             collapsed_dirs: HashSet::new(),
             file_tree_cursor: 0,
+            file_list_h_scroll: 0,
         }
     }
 
@@ -255,6 +259,14 @@ impl App {
             self.file_tree_cursor += 1;
             self.sync_selected_file_from_cursor();
         }
+    }
+
+    pub fn file_list_scroll_right(&mut self) {
+        self.file_list_h_scroll += 3;
+    }
+
+    pub fn file_list_scroll_left(&mut self) {
+        self.file_list_h_scroll = self.file_list_h_scroll.saturating_sub(3);
     }
 
     pub fn diff_scroll_up(&mut self) {
@@ -653,6 +665,31 @@ mod tests {
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_up();
         assert_eq!(app.file_tree_cursor, 0);
+    }
+
+    #[test]
+    fn test_file_list_scroll_right_increases_h_scroll() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.file_list_h_scroll, 0);
+        app.file_list_scroll_right();
+        assert_eq!(app.file_list_h_scroll, 3);
+        app.file_list_scroll_right();
+        assert_eq!(app.file_list_h_scroll, 6);
+    }
+
+    #[test]
+    fn test_file_list_scroll_left_decreases_h_scroll() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.file_list_h_scroll = 6;
+        app.file_list_scroll_left();
+        assert_eq!(app.file_list_h_scroll, 3);
+    }
+
+    #[test]
+    fn test_file_list_scroll_left_clamps_at_zero() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.file_list_scroll_left();
+        assert_eq!(app.file_list_h_scroll, 0);
     }
 
     #[test]
