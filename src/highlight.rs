@@ -14,7 +14,11 @@ pub struct HighlightedSpan {
 pub type DiffHighlights = Vec<Vec<Vec<HighlightedSpan>>>;
 
 pub struct SyntaxHighlighter {
+    /// syntect's built-in Sublime Text grammars (Rust, Python, HTML, …).
     default_set: SyntaxSet,
+    /// two-face grammars for languages absent from the Sublime defaults
+    /// (TypeScript, TSX, JSX, TOML, Dockerfile, …). Checked first so these
+    /// grammars win when an extension appears in both sets.
     extra_set: SyntaxSet,
     theme: Theme,
     /// Theme background color, used to enforce the diff panel background.
