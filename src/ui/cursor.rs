@@ -18,7 +18,13 @@ pub(super) struct VisualLine {
     pub(super) is_eol: bool,
 }
 
-/// Split `input` into visual lines of at most `content_width` characters.
+/// Split `input` into visual lines of at most `content_width` characters,
+/// using whole-word wrapping. When a word would overflow, the break occurs at
+/// the last space within the allowed width. The space is included at the end of
+/// the current visual row (so selection highlighting covers it). If no space
+/// exists within the allowed width (word longer than the line), the break falls
+/// back to character-level. Continuation rows skip any extra leading spaces
+/// produced by the break.
 pub(super) fn compute_visual_lines(input: &str, content_width: usize) -> Vec<VisualLine> {
     let cw = content_width.max(1);
     let mut result = Vec::new();
@@ -30,14 +36,59 @@ pub(super) fn compute_visual_lines(input: &str, content_width: usize) -> Vec<Vis
         } else {
             let chars: Vec<(usize, char)> = logical_line.char_indices().collect();
             let char_count = chars.len();
-            let mut char_start = 0;
-            while char_start < char_count {
-                let char_end = (char_start + cw).min(char_count);
-                let byte_start = byte_pos + chars[char_start].0;
-                let text: String = chars[char_start..char_end].iter().map(|(_, c)| *c).collect();
-                let is_eol = char_end == char_count;
-                result.push(VisualLine { text, byte_start, is_eol });
-                char_start = char_end;
+            let mut char_idx = 0usize;
+            let mut first_row = true;
+
+            while char_idx < char_count {
+                // Continuation rows: skip spaces consumed by the previous word-break.
+                if !first_row {
+                    while char_idx < char_count && chars[char_idx].1 == ' ' {
+                        char_idx += 1;
+                    }
+                    if char_idx >= char_count {
+                        // All remaining chars were spaces; the last pushed row is the eol.
+                        if let Some(last) = result.last_mut() {
+                            last.is_eol = true;
+                        }
+                        break;
+                    }
+                }
+                first_row = false;
+
+                let remaining = char_count - char_idx;
+                let byte_start = byte_pos + chars[char_idx].0;
+
+                if remaining <= cw {
+                    let text: String = chars[char_idx..].iter().map(|(_, c)| *c).collect();
+                    result.push(VisualLine { text, byte_start, is_eol: true });
+                    char_idx = char_count;
+                } else {
+                    // Greedy word-wrap: find the last space in the cw chars we'd take.
+                    let last_space = chars[char_idx..char_idx + cw]
+                        .iter()
+                        .rposition(|(_, c)| *c == ' ');
+
+                    if let Some(sp) = last_space.filter(|&sp| sp > 0) {
+                        // Include the break space in the current row's text so that
+                        // selection highlighting covers it without a gap.
+                        let text: String = chars[char_idx..char_idx + sp + 1]
+                            .iter()
+                            .map(|(_, c)| *c)
+                            .collect();
+                        result.push(VisualLine { text, byte_start, is_eol: false });
+                        char_idx += sp + 1;
+                        // Any further consecutive spaces are skipped at the top of the
+                        // next iteration.
+                    } else {
+                        // No usable space found: character-level break.
+                        let text: String = chars[char_idx..char_idx + cw]
+                            .iter()
+                            .map(|(_, c)| *c)
+                            .collect();
+                        result.push(VisualLine { text, byte_start, is_eol: false });
+                        char_idx += cw;
+                    }
+                }
             }
         }
         byte_pos += logical_line.len() + 1; // +1 for '\n'
@@ -58,6 +109,15 @@ pub(super) fn visual_row_and_col(cursor: usize, visual_lines: &[VisualLine]) -> 
         if on_line {
             let col_bytes = (cursor - vl.byte_start).min(vl.text.len());
             return (vrow, vl.text[..col_bytes].chars().count());
+        }
+    }
+    // Cursor is in a gap: a space consumed at a character-level wrap boundary (where
+    // no space existed within the allowed width, so the break fell mid-word and the
+    // leading space on the next row was skipped). Map it to the end of the nearest
+    // preceding row so the cursor remains stable.
+    for (vrow, vl) in visual_lines.iter().enumerate().rev() {
+        if vl.byte_start + vl.text.len() <= cursor {
+            return (vrow, vl.text.chars().count());
         }
     }
     let last = visual_lines.len().saturating_sub(1);
@@ -281,6 +341,118 @@ mod tests {
         // "hellothere\nhi" width=5: visual rows "hello","there","hi"
         // cursor at col 4 of "there" (byte 9) → clamp to end of "hi" (byte 13)
         assert_eq!(cursor_down_visual("hellothere\nhi", 9, 5), 13);
+    }
+
+    // ── compute_visual_lines: word-wrap behaviour ─────────────────────────────
+
+    #[test]
+    fn test_visual_lines_word_wrap_breaks_at_space() {
+        // Width wide enough to include the space after "hello": break there.
+        let vls = compute_visual_lines("hello world", 6);
+        assert_eq!(vls.len(), 2);
+        assert_eq!(vls[0].text, "hello ");  // space included for selection coverage
+        assert_eq!(vls[1].text, "world");
+        assert!(vls[1].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_word_wrap_space_byte_in_first_row() {
+        // The break space (byte 5 of "hello world") must be inside row 0's text so
+        // that selection highlighting has no gap at the wrap boundary.
+        let vls = compute_visual_lines("hello world", 6);
+        // row0: byte_start=0, text="hello " (6 bytes) → vl_end=6 > 5
+        assert!(vls[0].byte_start + vls[0].text.len() > 5,
+            "space at byte 5 must be covered by row 0");
+    }
+
+    #[test]
+    fn test_visual_lines_char_break_when_word_fills_width() {
+        // "hello" is exactly cw=5 chars; no space in first 5 → character-level break.
+        // The space at byte 5 is skipped (leading space on continuation row).
+        let vls = compute_visual_lines("hello world", 5);
+        assert_eq!(vls[0].text, "hello");
+        assert_eq!(vls[1].text, "world");
+        assert_eq!(vls[1].byte_start, 6); // space at byte 5 was consumed
+    }
+
+    #[test]
+    fn test_visual_lines_long_word_char_break() {
+        // Single word longer than cw: falls back to character-level breaking.
+        let vls = compute_visual_lines("superlongword", 5);
+        assert_eq!(vls[0].text, "super");
+        assert_eq!(vls[1].text, "longw");
+        assert_eq!(vls[2].text, "ord");
+        assert!(vls[2].is_eol);
+    }
+
+    #[test]
+    fn test_visual_lines_multiple_spaces_all_fit() {
+        // Three spaces after "hello" all fit within cw=8 → all included in row 0.
+        let vls = compute_visual_lines("hello   world", 8);
+        assert_eq!(vls[0].text, "hello   ");
+        assert_eq!(vls[1].text, "world");
+    }
+
+    #[test]
+    fn test_visual_lines_multiple_spaces_partial_fit() {
+        // Only one space fits in cw=6 ("hello " = 6 chars); the remaining two spaces
+        // are consumed as leading spaces on the continuation row.
+        let vls = compute_visual_lines("hello   world", 6);
+        assert_eq!(vls[0].text, "hello ");
+        assert_eq!(vls[1].byte_start, 8); // "world" starts after all three spaces
+        assert_eq!(vls[1].text, "world");
+    }
+
+    #[test]
+    fn test_visual_lines_trailing_spaces_eol_fix() {
+        // Logical line "hello " (trailing space): char-break at 5, then the trailing
+        // space is consumed. The only row must be marked is_eol=true.
+        let vls = compute_visual_lines("hello ", 5);
+        assert_eq!(vls.len(), 1);
+        assert!(vls[0].is_eol, "sole row must be is_eol even when trailing spaces consumed");
+    }
+
+    #[test]
+    fn test_visual_lines_word_wrap_preserves_byte_starts() {
+        // "ab cd" cw=3: row0="ab " (bytes 0-2), row1="cd" (bytes 3-4).
+        let vls = compute_visual_lines("ab cd", 3);
+        assert_eq!(vls[0].text, "ab ");
+        assert_eq!(vls[0].byte_start, 0);
+        assert_eq!(vls[1].text, "cd");
+        assert_eq!(vls[1].byte_start, 3);
+    }
+
+    // ── visual_row_and_col: gap handling ─────────────────────────────────────
+
+    #[test]
+    fn test_vrow_col_space_covered_by_word_break_row() {
+        // Word-break case: space is inside row 0's text, so it's found directly.
+        let vls = compute_visual_lines("hello world", 6);
+        // byte 5 = the space; row0 text="hello " covers bytes 0-5
+        assert_eq!(visual_row_and_col(5, &vls), (0, 5));
+    }
+
+    #[test]
+    fn test_vrow_col_cursor_at_char_break_gap() {
+        // Char-break case: space at byte 5 is consumed → gap.
+        // Must map to end of row 0 via the gap fallback.
+        let vls = compute_visual_lines("hello world", 5);
+        assert_eq!(visual_row_and_col(5, &vls), (0, 5));
+    }
+
+    // ── word wrap: cursor navigation across wrapped rows ──────────────────────
+
+    #[test]
+    fn test_cursor_up_across_word_wrap() {
+        // "hello world" cw=6: row0="hello "(0-5), row1="world"(6-10)
+        // cursor at byte 8 (col 2 in "world") → up → col 2 in "hello " = byte 2
+        assert_eq!(cursor_up_visual("hello world", 8, 6), 2);
+    }
+
+    #[test]
+    fn test_cursor_down_across_word_wrap() {
+        // cursor at byte 2 (col 2 in "hello ") → down → col 2 in "world" = byte 8
+        assert_eq!(cursor_down_visual("hello world", 2, 6), 8);
     }
 
     // ── line_spans ────────────────────────────────────────────────────────────

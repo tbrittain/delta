@@ -4,7 +4,7 @@
 
 Press `c` on any hunk in the diff view to open the comment input. If the hunk already has a note, `c` redirects to edit mode pre-populated with the existing text.
 
-The input opens as a **modal popup** overlaid on the diff view. The popup title shows the hunk header (`@@ -10,5 +10,6 @@`) so it is always clear which hunk is being commented on. A blinking bar (caret) cursor is used — it sits at the insertion point without displacing characters. Text wraps within the popup.
+The input opens as a **modal popup** overlaid on the diff view. The popup title shows the hunk header (`@@ -10,5 +10,6 @@`) so it is always clear which hunk is being commented on. A blinking bar (caret) cursor is used — it sits at the insertion point without displacing characters. Text wraps within the popup using whole-word wrapping: when a word would overflow the panel edge, the entire word is pushed to the next visual line. If a single word exceeds the panel width it is broken at the character boundary. The space at a word-break boundary is included in the preceding row's text so that selection highlighting covers it without gaps.
 
 **Keys in comment mode:**
 
@@ -57,14 +57,6 @@ Comments attach to a whole hunk. There is no way to select specific changed line
 - The inline `◎` marker anchors to the last selected line rather than the hunk footer.
 
 **Priority:** High value. Significant data-model and UX change — design carefully before implementing.
-
----
-
-### Word wrap breaks words mid-word
-
-When a line of text in the comment popup reaches the panel edge, the wrap currently splits at the character boundary — a long word is cut and continued on the next visual line. The preferred behaviour is **whole-word wrapping**: the entire word that would overflow is pushed down to the next line, matching standard editor and text-box conventions.
-
-**Priority:** Low friction improvement, no data model changes needed. Affects only the visual line layout in the popup renderer.
 
 ---
 
