@@ -16,14 +16,14 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame, Terminal,
 };
 
 use crate::app::{App, FeedbackNote, Mode, Panel, delete_selection, selected_range};
 use crate::diff::{ChangedFile, FileStatus};
 use crate::filetree::TreeItem;
-use crate::git::GitBackend;
+use crate::git::{GitBackend, WhitespaceMode};
 
 use cursor::{
     cursor_up_visual, cursor_down_visual,
@@ -85,7 +85,7 @@ fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     log::debug!("[ui] load_current_file: path={:?}", path);
-    let result = git.file_diff(&app.from, &app.to, &path);
+    let result = git.file_diff(&app.from, &app.to, &path, app.whitespace_mode);
     log::debug!("[ui] load_current_file: file_diff result={}", match &result {
         Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})")
     });
@@ -167,6 +167,12 @@ fn run_event_loop<G: GitBackend>(
                     }
                     KeyCode::Char('[') => { if app.focused_panel == Panel::DiffView { app.prev_hunk(); } }
                     KeyCode::Char(']') => { if app.focused_panel == Panel::DiffView { app.next_hunk(); } }
+                    KeyCode::Char('w') => {
+                        if app.focused_panel == Panel::DiffView {
+                            app.cycle_whitespace_mode();
+                            load_current_file(app, git);
+                        }
+                    }
                     KeyCode::Char('c') => { if app.focused_panel == Panel::DiffView { app.start_comment(); } }
                     KeyCode::Char(' ') => match app.focused_panel {
                         Panel::FileList  => app.toggle_dir_at_cursor(),
@@ -400,33 +406,50 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
-    let title = {
-        // Use the loaded file's path so the title stays in sync with the diff
-        // content. Falling back to selected_file only when nothing is loaded yet
-        // (e.g. initial "Loading…" state).
-        let file_name = app.current_diff
-            .as_ref()
-            .map(|d| d.file.path.display().to_string())
-            .or_else(|| app.files.get(app.selected_file).map(|f| f.path.display().to_string()))
-            .unwrap_or_else(|| "Diff".to_string());
-        match &app.current_diff {
-            Some(diff) if !diff.hunks.is_empty() =>
-                format!(" {} — {}/{} ", file_name, app.selected_hunk + 1, diff.hunks.len()),
-            _ => format!(" {} ", file_name),
-        }
+    // Use the loaded file's path so the title stays in sync with the diff
+    // content. Falling back to selected_file only when nothing is loaded yet.
+    let file_name = app.current_diff
+        .as_ref()
+        .map(|d| d.file.path.display().to_string())
+        .or_else(|| app.files.get(app.selected_file).map(|f| f.path.display().to_string()))
+        .unwrap_or_else(|| "Diff".to_string());
+    let ws_label = app.whitespace_mode.label();
+    let title = match &app.current_diff {
+        Some(diff) if !diff.hunks.is_empty() =>
+            format!(" {} — {}/{}{} ", file_name, app.selected_hunk + 1, diff.hunks.len(), ws_label),
+        _ => format!(" {}{} ", file_name, ws_label),
     };
     let note_max_chars = area.width.saturating_sub(6) as usize;
     let text = build_diff_text(app, note_max_chars);
-    let para = Paragraph::new(text)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style)
-            .border_type(border_type)
-            .style(Style::default().bg(app.highlighter.panel_bg))
-            .title(title))
-        .scroll((app.diff_scroll as u16, 0))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(para, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .border_type(border_type)
+        .style(Style::default().bg(app.highlighter.panel_bg))
+        .title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(text)
+            .scroll((app.diff_scroll as u16, 0))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+    // Scroll-position indicator: only shown when the diff is taller than the viewport.
+    let total = app.diff_content_lines();
+    let viewport = inner.height as usize;
+    if total > viewport {
+        let mut scrollbar_state = ScrollbarState::new(total)
+            .position(app.diff_scroll)
+            .viewport_content_length(viewport);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None),
+            inner,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -535,7 +558,12 @@ fn status_bar_text(app: &App) -> String {
                 let fold_hint = if app.selected_hunk_is_foldable() {
                     if app.expanded_hunks.contains(&app.selected_hunk) { "  Space: fold" } else { "  Space: expand" }
                 } else { "" };
-                format!(" Tab/Shift+Tab: navigate  ↑↓: scroll  []: hunk{}{}  q: quit{}", note_actions, fold_hint, notes_str)
+                let ws_hint = match app.whitespace_mode {
+                    WhitespaceMode::None          => "  w: whitespace".to_string(),
+                    WhitespaceMode::IgnoreChanges => "  w: whitespace(-b)".to_string(),
+                    WhitespaceMode::IgnoreAll     => "  w: whitespace(-w)".to_string(),
+                };
+                format!(" Tab/Shift+Tab: navigate  ↑↓: scroll  []: hunk{}{}{}  q: quit{}", note_actions, fold_hint, ws_hint, notes_str)
             }
         },
     }
@@ -763,6 +791,75 @@ mod tests {
         assert!(popup_rendered(&app).contains("@@"));
     }
 
+    // ── Whitespace mode in diff title ─────────────────────────────────────────
+
+    fn diff_title(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_diff_view(f, app, f.area())).unwrap();
+        // Title appears in the top border row (row 0). Collect all chars from that row.
+        terminal.backend().buffer().content()[..(width as usize)]
+            .iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn test_diff_title_no_ws_mode() {
+        let app = make_app_with_hunks(1);
+        let title = diff_title(&app, 80, 10);
+        assert!(!title.contains("(-b)") && !title.contains("(-w)"),
+            "no whitespace mode should show no label");
+    }
+
+    #[test]
+    fn test_diff_title_shows_ws_mode_label() {
+        let mut app = make_app_with_hunks(1);
+        app.whitespace_mode = crate::git::WhitespaceMode::IgnoreAll;
+        let title = diff_title(&app, 80, 10);
+        assert!(title.contains("(-w)"), "IgnoreAll should show (-w) in title; got: {}", title);
+    }
+
+    #[test]
+    fn test_diff_title_shows_ignore_changes_label() {
+        let mut app = make_app_with_hunks(1);
+        app.whitespace_mode = crate::git::WhitespaceMode::IgnoreChanges;
+        let title = diff_title(&app, 80, 10);
+        assert!(title.contains("(-b)"), "IgnoreChanges should show (-b) in title; got: {}", title);
+    }
+
+    // ── Scroll-position indicator ─────────────────────────────────────────────
+
+    #[test]
+    fn test_scroll_indicator_visible_when_content_exceeds_viewport() {
+        // Build an app with many hunks so content overflows a small panel.
+        let app = make_app_with_hunks(20);
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_diff_view(f, &app, f.area())).unwrap();
+        let buf = terminal.backend().buffer();
+        // Inner right column is col 78 (border at 79). Check rows 1..11 for any scrollbar char.
+        let scrollbar_chars = ["│", "█", "▐", "▌"];
+        let found = (1u16..11).any(|row| {
+            scrollbar_chars.contains(&buf[(78u16, row)].symbol())
+        });
+        assert!(found, "scrollbar should appear in the right inner column when content is taller than viewport");
+    }
+
+    #[test]
+    fn test_scroll_indicator_absent_when_content_fits() {
+        // Single hunk (5 lines) in a tall panel (20 rows) — no scroll needed, no indicator.
+        let app = make_app_with_hunks(1);
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_diff_view(f, &app, f.area())).unwrap();
+        let buf = terminal.backend().buffer();
+        // No scrollbar in the inner right column.
+        let scrollbar_chars = ["│", "█", "▐", "▌"];
+        let found = (1u16..19).any(|row| {
+            scrollbar_chars.contains(&buf[(78u16, row)].symbol())
+        });
+        assert!(!found, "scrollbar should not appear when all content fits in the viewport");
+    }
+
     // ── Status bar ────────────────────────────────────────────────────────────
 
     #[test]
@@ -802,6 +899,21 @@ mod tests {
         }
         app.selected_hunk = 0;
         assert!(status_bar_text(&app).contains("●2 notes"));
+    }
+
+    #[test]
+    fn test_status_bar_diff_shows_whitespace_hint() {
+        let app = app_diff_view();
+        let text = status_bar_text(&app);
+        assert!(text.contains("w: whitespace"), "status bar should mention whitespace key");
+    }
+
+    #[test]
+    fn test_status_bar_diff_shows_active_ws_mode() {
+        let mut app = app_diff_view();
+        app.whitespace_mode = WhitespaceMode::IgnoreAll;
+        let text = status_bar_text(&app);
+        assert!(text.contains("(-w)"), "active whitespace mode should appear in status bar");
     }
 
     #[test]

@@ -1,10 +1,12 @@
 mod common;
 
+use std::process::{Command, Stdio};
+
 use common::FixtureRepo;
 use delta::app::App;
 use delta::diff::{ChangedFile, FileStatus, LineKind, parse_diff};
 use delta::export;
-use delta::git::{GitBackend, SystemGit};
+use delta::git::{GitBackend, SystemGit, WhitespaceMode};
 
 // ── Git integration layer ─────────────────────────────────────────────────────
 
@@ -76,7 +78,7 @@ fn test_changed_files_paths_are_relative() {
 fn test_file_diff_returns_nonempty_for_modified_file() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     assert!(!raw.is_empty());
 }
 
@@ -84,7 +86,7 @@ fn test_file_diff_returns_nonempty_for_modified_file() {
 fn test_file_diff_contains_hunk_marker() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     assert!(raw.contains("@@"), "expected unified diff hunk marker");
 }
 
@@ -92,7 +94,7 @@ fn test_file_diff_contains_hunk_marker() {
 fn test_file_diff_for_added_file_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
     let diff = parse_diff(&raw, file);
     for hunk in &diff.hunks {
@@ -112,7 +114,7 @@ fn test_file_diff_for_added_file_has_only_additions() {
 fn test_parse_diff_main_rs_has_one_hunk() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
     assert_eq!(diff.hunks.len(), 1);
@@ -122,7 +124,7 @@ fn test_parse_diff_main_rs_has_one_hunk() {
 fn test_parse_diff_main_rs_has_added_and_removed_lines() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -139,7 +141,7 @@ fn test_parse_diff_main_rs_has_added_and_removed_lines() {
 fn test_parse_diff_main_rs_added_line_content() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -161,7 +163,7 @@ fn test_parse_diff_main_rs_added_line_content() {
 fn test_parse_diff_lib_rs_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/lib.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/lib.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -176,7 +178,7 @@ fn test_parse_diff_lib_rs_has_only_additions() {
 fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
     let diff = parse_diff(&raw, file);
 
@@ -188,7 +190,7 @@ fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
 fn test_parse_diff_added_lines_have_new_line_numbers() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
     let diff = parse_diff(&raw, file);
 
@@ -229,7 +231,7 @@ fn test_changed_files_from_subdirectory() {
 fn test_file_diff_from_subdirectory_returns_nonempty() {
     let repo = FixtureRepo::new();
     let git = SystemGit::new_at(&repo.path.join("src"));
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     assert!(!raw.is_empty(), "file_diff should return content when run from a repo subdirectory");
     assert!(raw.contains("@@"), "should contain unified diff hunk marker");
 }
@@ -266,8 +268,8 @@ fn test_file_diff_with_explicit_to_ref() {
     // file_diff with an explicit to ref should return the same content as with HEAD.
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
-    let diff_implicit = git.file_diff(FixtureRepo::FROM_REF, "HEAD", "src/main.rs").unwrap();
-    let diff_explicit = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    let diff_implicit = git.file_diff(FixtureRepo::FROM_REF, "HEAD", "src/main.rs", WhitespaceMode::None).unwrap();
+    let diff_explicit = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
     assert_eq!(diff_implicit, diff_explicit);
 }
 
@@ -277,8 +279,8 @@ fn test_reversed_range_shows_inverse_diff() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
 
-    let forward = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
-    let backward = git.file_diff(FixtureRepo::TO_REF, FixtureRepo::FROM_REF, "src/main.rs").unwrap();
+    let forward = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
+    let backward = git.file_diff(FixtureRepo::TO_REF, FixtureRepo::FROM_REF, "src/main.rs", WhitespaceMode::None).unwrap();
 
     // Forward diff adds "delta"; backward diff removes it (shows as addition from the inverse perspective)
     assert!(forward.contains("+") && forward.contains("-"));
@@ -319,7 +321,7 @@ fn test_pipeline_loads_and_parses_diff_into_app() {
     // Load the diff for the first file manually (as the TUI would on startup)
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     assert!(app.current_diff.is_some());
@@ -339,7 +341,7 @@ fn test_pipeline_comment_and_markdown_export() {
     app.select_file(main_idx);
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     // Simulate the user pressing 'c' and submitting a comment
@@ -370,7 +372,7 @@ fn test_pipeline_comment_and_json_export() {
     app.select_file(main_idx);
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
-    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path).unwrap();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
     app.current_diff = Some(parse_diff(&raw, file));
 
     app.start_comment();
@@ -385,4 +387,71 @@ fn test_pipeline_comment_and_json_export() {
 
     assert!(note["file"].as_str().unwrap().contains("main.rs"));
     assert_eq!(note["note"], "needs a test");
+}
+
+// ── Whitespace-sensitivity flags ──────────────────────────────────────────────
+
+/// Builds a minimal two-commit repo where `file.rs` changes only in whitespace
+/// (indentation doubled in HEAD). Returns the TempDir to keep the repo alive.
+fn make_whitespace_only_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let path = dir.path();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git failed");
+    };
+
+    git(&["init"]);
+    git(&["config", "user.email", "test@delta.test"]);
+    git(&["config", "user.name", "Delta Test"]);
+
+    // Base: 4-space indent
+    std::fs::write(path.join("file.rs"), "fn foo() {\n    let x = 1;\n}\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-m", "base"]);
+
+    // HEAD: 8-space indent — whitespace-only change
+    std::fs::write(path.join("file.rs"), "fn foo() {\n        let x = 1;\n}\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-m", "whitespace only"]);
+
+    dir
+}
+
+#[test]
+fn test_file_diff_none_shows_whitespace_changes() {
+    let dir = make_whitespace_only_repo();
+    let git = SystemGit::with_dir(dir.path());
+    let raw = git.file_diff("HEAD^", "HEAD", "file.rs", WhitespaceMode::None).unwrap();
+    assert!(raw.contains("@@"), "normal diff should produce a hunk for whitespace changes");
+}
+
+#[test]
+fn test_file_diff_ignore_all_whitespace_suppresses_changes() {
+    let dir = make_whitespace_only_repo();
+    let git = SystemGit::with_dir(dir.path());
+    let raw = git.file_diff("HEAD^", "HEAD", "file.rs", WhitespaceMode::IgnoreAll).unwrap();
+    assert!(
+        !raw.contains("@@"),
+        "ignore-all-whitespace (-w) should suppress a whitespace-only diff; got: {:?}",
+        raw
+    );
+}
+
+#[test]
+fn test_file_diff_ignore_changes_whitespace_suppresses_changes() {
+    let dir = make_whitespace_only_repo();
+    let git = SystemGit::with_dir(dir.path());
+    let raw = git.file_diff("HEAD^", "HEAD", "file.rs", WhitespaceMode::IgnoreChanges).unwrap();
+    assert!(
+        !raw.contains("@@"),
+        "ignore-whitespace-changes (-b) should suppress a whitespace-only diff; got: {:?}",
+        raw
+    );
 }

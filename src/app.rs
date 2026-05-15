@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::diff::{ChangedFile, DiffFile, DiffLine, LineKind};
 use crate::filetree::{TreeItem, build_tree};
+use crate::git::WhitespaceMode;
 
 /// Context runs of this many lines or more are folded by default.
 pub(crate) const FOLD_THRESHOLD: usize = 6;
@@ -81,6 +82,8 @@ pub struct App {
     /// Horizontal scroll offset (in character columns) for the scrollable name portion
     /// of file-list items. Adjusted with ←/→ when the file-list panel is focused.
     pub file_list_h_scroll: usize,
+    /// Active whitespace-sensitivity mode for `git diff`. Cycled with `w` in the diff view.
+    pub whitespace_mode: WhitespaceMode,
 }
 
 impl App {
@@ -108,6 +111,7 @@ impl App {
             collapsed_dirs: HashSet::new(),
             file_tree_cursor: 0,
             file_list_h_scroll: 0,
+            whitespace_mode: WhitespaceMode::None,
         }
     }
 
@@ -302,6 +306,11 @@ impl App {
         }).max().unwrap_or(0).saturating_sub(FILE_LIST_INNER_WIDTH)
     }
 
+    /// Advance the whitespace mode one step: None → -b → -w → None.
+    pub fn cycle_whitespace_mode(&mut self) {
+        self.whitespace_mode = self.whitespace_mode.next();
+    }
+
     pub fn diff_scroll_up(&mut self) {
         self.diff_scroll = self.diff_scroll.saturating_sub(3);
     }
@@ -357,9 +366,9 @@ impl App {
         offset
     }
 
-    /// Total rendered line count for the current diff, used to cap scroll.
+    /// Total rendered line count for the current diff, used to cap scroll and drive the scrollbar.
     /// Accounts for folded context runs and per-line visual row counts when wrap is on.
-    fn diff_content_lines(&self) -> usize {
+    pub(crate) fn diff_content_lines(&self) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
         let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
@@ -613,6 +622,7 @@ pub(crate) fn delete_selection(
 mod tests {
     use super::*;
     use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::git::WhitespaceMode;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -663,6 +673,20 @@ mod tests {
                 .collect(),
         });
         app
+    }
+
+    // ── Whitespace mode ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cycle_whitespace_mode() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.whitespace_mode, WhitespaceMode::None);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::IgnoreChanges);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::IgnoreAll);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::None);
     }
 
     // ── File list navigation ──────────────────────────────────────────────────

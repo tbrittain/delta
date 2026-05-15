@@ -3,9 +3,48 @@ use std::process::Command;
 
 use crate::diff::{ChangedFile, FileStatus};
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum WhitespaceMode {
+    #[default]
+    None,
+    /// `git diff -b`: ignore changes in whitespace amount
+    IgnoreChanges,
+    /// `git diff -w`: ignore all whitespace
+    IgnoreAll,
+}
+
+impl WhitespaceMode {
+    /// The git flag for this mode, or `None` for the default (no flag).
+    pub fn flag(self) -> Option<&'static str> {
+        match self {
+            Self::None          => None,
+            Self::IgnoreChanges => Some("-b"),
+            Self::IgnoreAll     => Some("-w"),
+        }
+    }
+
+    /// Cycle to the next mode: None → -b → -w → None.
+    pub fn next(self) -> Self {
+        match self {
+            Self::None          => Self::IgnoreChanges,
+            Self::IgnoreChanges => Self::IgnoreAll,
+            Self::IgnoreAll     => Self::None,
+        }
+    }
+
+    /// Short label shown in the diff panel title, or `""` when no mode is active.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None          => "",
+            Self::IgnoreChanges => " (-b)",
+            Self::IgnoreAll     => " (-w)",
+        }
+    }
+}
+
 pub trait GitBackend {
     fn changed_files(&self, from: &str, to: &str) -> Result<Vec<ChangedFile>>;
-    fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String>;
+    fn file_diff(&self, from: &str, to: &str, path: &str, whitespace: WhitespaceMode) -> Result<String>;
 }
 
 pub struct SystemGit {
@@ -92,19 +131,25 @@ impl GitBackend for SystemGit {
         Ok(files)
     }
 
-    fn file_diff(&self, from: &str, to: &str, path: &str) -> Result<String> {
+    fn file_diff(&self, from: &str, to: &str, path: &str, whitespace: WhitespaceMode) -> Result<String> {
         // Git always accepts forward slashes; on Windows PathBuf produces backslashes.
         let normalized = path.replace('\\', "/");
+        let range = format!("{}..{}", from, to);
 
         log::debug!(
-            "[git] file_diff: from={:?} to={:?} path={:?} normalized={:?} cwd={:?}",
-            from, to, path, normalized, self.repo_dir
+            "[git] file_diff: from={:?} to={:?} path={:?} normalized={:?} whitespace={:?} cwd={:?}",
+            from, to, path, normalized, whitespace, self.repo_dir
         );
 
-        let output = Command::new("git")
-            .args(["diff", "--no-ext-diff", &format!("{}..{}", from, to), "--", &normalized])
-            .current_dir(&self.repo_dir)
-            .output()
+        let mut cmd = Command::new("git");
+        cmd.arg("diff").arg("--no-ext-diff");
+        if let Some(flag) = whitespace.flag() {
+            cmd.arg(flag);
+        }
+        cmd.arg(&range).arg("--").arg(&normalized);
+        cmd.current_dir(&self.repo_dir);
+
+        let output = cmd.output()
             .with_context(|| format!("Failed to run git diff for {}", path))?;
 
         log::debug!(
@@ -177,6 +222,31 @@ pub fn parse_name_status(output: &str) -> Vec<ChangedFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── WhitespaceMode ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_whitespace_mode_flags() {
+        assert_eq!(WhitespaceMode::None.flag(), None);
+        assert_eq!(WhitespaceMode::IgnoreChanges.flag(), Some("-b"));
+        assert_eq!(WhitespaceMode::IgnoreAll.flag(), Some("-w"));
+    }
+
+    #[test]
+    fn test_whitespace_mode_cycle() {
+        assert_eq!(WhitespaceMode::None.next(), WhitespaceMode::IgnoreChanges);
+        assert_eq!(WhitespaceMode::IgnoreChanges.next(), WhitespaceMode::IgnoreAll);
+        assert_eq!(WhitespaceMode::IgnoreAll.next(), WhitespaceMode::None);
+    }
+
+    #[test]
+    fn test_whitespace_mode_labels() {
+        assert_eq!(WhitespaceMode::None.label(), "");
+        assert_eq!(WhitespaceMode::IgnoreChanges.label(), " (-b)");
+        assert_eq!(WhitespaceMode::IgnoreAll.label(), " (-w)");
+    }
+
+    // ── parse_name_status ─────────────────────────────────────────────────────
 
     #[test]
     fn test_parse_name_status_modified() {
