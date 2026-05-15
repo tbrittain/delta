@@ -351,20 +351,16 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = tree.iter().map(|item| {
         let depth = item.depth();
         let indent = "  ".repeat(depth);
-        let indent_width = depth * 2;
         match item {
             TreeItem::Dir { display_name, file_count, collapsed, has_notes, .. } => {
                 let arrow = if *collapsed { "▸" } else { "▾" };
                 let note_marker = if *has_notes { " ●" } else { "" };
-                // Fixed prefix: indent + arrow + " " (arrow is 1 display cell)
-                let prefix_width = indent_width + 2;
-                let avail = inner_width.saturating_sub(prefix_width);
-                let content = format!("{} ({}){}", display_name, file_count, note_marker);
-                let visible = hscroll_str(&content, h_scroll, avail);
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{}{} ", indent, arrow), Style::default().fg(ACCENT)),
-                    Span::raw(visible),
-                ]))
+                let raw_spans: Vec<(String, Style)> = vec![
+                    (indent, Style::default()),
+                    (format!("{} ", arrow), Style::default().fg(ACCENT)),
+                    (format!("{} ({}){}", display_name, file_count, note_marker), Style::default()),
+                ];
+                ListItem::new(Line::from(viewport_hscroll(raw_spans, h_scroll, inner_width)))
             }
             TreeItem::File { file_idx, display_name, has_notes, .. } => {
                 let f = &app.files[*file_idx];
@@ -375,17 +371,12 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     FileStatus::Deleted  => Color::Red,
                     FileStatus::Renamed  => Color::Cyan,
                 };
-                // Fixed prefix: indent + "[M]" (3 chars) + " " (1 char) = 4 chars total.
-                // The space is kept as a plain span so only the bracket+letter+bracket is coloured.
-                let prefix_width = indent_width + 4;
-                let avail = inner_width.saturating_sub(prefix_width);
-                let content = format!("{}{}", display_name, note_marker);
-                let visible = hscroll_str(&content, h_scroll, avail);
-                ListItem::new(Line::from(vec![
-                    Span::raw(indent),
-                    Span::styled(format!("[{}]", f.status.indicator()), Style::default().fg(status_color)),
-                    Span::raw(format!(" {}", visible)),
-                ]))
+                let raw_spans: Vec<(String, Style)> = vec![
+                    (indent, Style::default()),
+                    (format!("[{}]", f.status.indicator()), Style::default().fg(status_color)),
+                    (format!(" {}{}", display_name, note_marker), Style::default()),
+                ];
+                ListItem::new(Line::from(viewport_hscroll(raw_spans, h_scroll, inner_width)))
             }
         }
     }).collect();
@@ -501,9 +492,26 @@ fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
     app.focused_panel = Panel::DiffView;
 }
 
-/// Return the substring of `s` starting at character offset `skip`, capped to `max` characters.
-fn hscroll_str(s: &str, skip: usize, max: usize) -> String {
-    s.chars().skip(skip).take(max).collect()
+/// Apply a viewport horizontal scroll to a sequence of coloured spans.
+/// Characters before `skip` are dropped (spread evenly across spans in order);
+/// at most `max_width` characters are returned. Colours are preserved per span.
+fn viewport_hscroll(spans: Vec<(String, Style)>, skip: usize, max_width: usize) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+    let mut remaining_skip = skip;
+    let mut remaining_width = max_width;
+    for (text, style) in spans {
+        if remaining_width == 0 { break; }
+        let chars: Vec<char> = text.chars().collect();
+        let skip_here = remaining_skip.min(chars.len());
+        remaining_skip -= skip_here;
+        let visible = &chars[skip_here..];
+        if visible.is_empty() { continue; }
+        let take = remaining_width.min(visible.len());
+        let s: String = visible[..take].iter().collect();
+        remaining_width -= take;
+        result.push(Span::styled(s, style));
+    }
+    result
 }
 
 fn status_bar_text(app: &App) -> String {
@@ -876,6 +884,28 @@ mod tests {
     }
 
     #[test]
+    fn test_file_list_hscroll_is_full_viewport() {
+        // Viewport scroll: when h_scroll > 0 the entire row content shifts left,
+        // so the status indicator eventually scrolls off the left edge.
+        // A depth-0 file renders as "[M] main.rs" inside the panel.
+        // With h_scroll=4 the first 4 chars are gone: "[M] " disappears,
+        // so col 1 (first content cell) should be 'm' not '['.
+        let files = vec![ChangedFile {
+            path: PathBuf::from("main.rs"),
+            status: FileStatus::Modified,
+        }];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.file_list_h_scroll = 4; // skip "[M] "
+
+        let backend = TestBackend::new(32, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_file_list(f, &app, f.area())).unwrap();
+        let buf = terminal.backend().buffer();
+        // Col 0 is the panel border; col 1 is the first content column.
+        assert_eq!(buf[(1, 1)].symbol(), "m", "after scrolling past '[M] ', first char should be 'm' from 'main.rs'");
+    }
+
+    #[test]
     fn test_file_list_renders_dir_arrow() {
         let app = app_with_tree_files();
         let s = file_list_rendered(&app);
@@ -933,10 +963,23 @@ mod tests {
     }
 
     #[test]
-    fn test_hscroll_str_skips_and_caps() {
-        assert_eq!(hscroll_str("hello world", 6, 5), "world");
-        assert_eq!(hscroll_str("hello world", 0, 5), "hello");
-        assert_eq!(hscroll_str("hi", 10, 5), "");
-        assert_eq!(hscroll_str("hello", 0, 100), "hello");
+    fn test_viewport_hscroll_skips_and_caps() {
+        // Single span, basic skip and cap behaviour.
+        let plain = Style::default();
+        let result = viewport_hscroll(vec![("hello world".into(), plain)], 6, 5);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "world");
+
+        // Skip past end of first span into second.
+        let yellow = Style::default().fg(Color::Yellow);
+        let spans = vec![("[M]".into(), yellow), (" main.rs".into(), plain)];
+        let result = viewport_hscroll(spans, 4, 20);
+        assert_eq!(result.len(), 1, "first span fully skipped");
+        assert_eq!(result[0].content, "main.rs");
+        assert_eq!(result[0].style, plain, "remaining content has plain style");
+
+        // skip == 0: all content returned up to max_width.
+        let result = viewport_hscroll(vec![("hello".into(), plain)], 0, 3);
+        assert_eq!(result[0].content, "hel");
     }
 }
