@@ -8,7 +8,7 @@ The right panel shows the unified diff for the currently selected file. Lines ar
 - **Red background** (`-`) — removed lines
 - **No background** (` `) — context lines (unchanged)
 
-Language syntax is highlighted using the `syntect` crate (base16-ocean.dark theme, Sublime Text grammars). The language is detected from the file extension; unknown extensions fall back to plain text. Syntax foreground colors are layered on top of the change-type background so both signals are visible simultaneously.
+Language syntax is highlighted using the `syntect` crate (base16-ocean.dark theme, Sublime Text grammars) extended by `two-face` for languages not in the default Sublime bundle. The language is detected from the file extension; unknown extensions fall back to plain text. Syntax foreground colors are layered on top of the change-type background so both signals are visible simultaneously. Supported extensions include all syntect defaults plus TypeScript (`.ts`), TSX/JSX (`.tsx`, `.jsx`), TOML, Dockerfile, and 200+ others from `two-face`.
 
 Line numbers appear in dark gray to the left of each line, showing the new file line number for added/context lines and the old file line number for removed lines.
 
@@ -116,14 +116,3 @@ The diff view always uses soft word wrap (`Wrap { trim: false }`). There is no w
 
 ---
 
-### Syntax highlighting missing for TypeScript and JSX/TSX
-
-`syntect`'s default grammar set is the built-in Sublime Text bundle. TypeScript is a third-party Sublime package and is **not** included. As a result `.ts`, `.tsx`, and `.jsx` all fall back to plain text — no token colours at all, even for plain TypeScript files.
-
-**Affected extensions confirmed:** `.ts`, `.tsx`, `.jsx`. `.vue` and `.svelte` are almost certainly in the same situation.
-
-**Possible directions:**
-- Bundle additional Sublime Text grammars (TypeScript from `TypeScript-TmLanguage`, JSX from `babel-sublime`) and compile them into the binary at build time via `syntect`'s `build.rs` dump mechanism.
-- Extend the extension → language map to alias `.ts` → JavaScript and `.tsx`/`.jsx` → JavaScript as a quick fallback; highlights will be approximate but better than nothing.
-
-**Priority:** High for front-end codebases. The alias approach is a one-liner improvement; full grammar bundling is higher quality but requires build-time work and binary size consideration.

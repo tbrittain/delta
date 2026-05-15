@@ -401,8 +401,14 @@ fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
         (Style::default().fg(Color::DarkGray), BorderType::Plain)
     };
     let title = {
-        let file_name = app.files.get(app.selected_file)
-            .map(|f| f.path.display().to_string()).unwrap_or_else(|| "Diff".to_string());
+        // Use the loaded file's path so the title stays in sync with the diff
+        // content. Falling back to selected_file only when nothing is loaded yet
+        // (e.g. initial "Loading…" state).
+        let file_name = app.current_diff
+            .as_ref()
+            .map(|d| d.file.path.display().to_string())
+            .or_else(|| app.files.get(app.selected_file).map(|f| f.path.display().to_string()))
+            .unwrap_or_else(|| "Diff".to_string());
         match &app.current_diff {
             Some(diff) if !diff.hunks.is_empty() =>
                 format!(" {} — {}/{} ", file_name, app.selected_hunk + 1, diff.hunks.len()),
