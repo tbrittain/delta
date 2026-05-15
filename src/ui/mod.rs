@@ -375,15 +375,16 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     FileStatus::Deleted  => Color::Red,
                     FileStatus::Renamed  => Color::Cyan,
                 };
-                // Fixed prefix: indent + "[M] " (4 chars: bracket, letter, bracket, space)
+                // Fixed prefix: indent + "[M]" (3 chars) + " " (1 char) = 4 chars total.
+                // The space is kept as a plain span so only the bracket+letter+bracket is coloured.
                 let prefix_width = indent_width + 4;
                 let avail = inner_width.saturating_sub(prefix_width);
                 let content = format!("{}{}", display_name, note_marker);
                 let visible = hscroll_str(&content, h_scroll, avail);
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
-                    Span::styled(format!("[{}] ", f.status.indicator()), Style::default().fg(status_color)),
-                    Span::raw(visible),
+                    Span::styled(format!("[{}]", f.status.indicator()), Style::default().fg(status_color)),
+                    Span::raw(format!(" {}", visible)),
                 ]))
             }
         }
@@ -851,6 +852,27 @@ mod tests {
             ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Added },
         ];
         App::new(files, "main".to_string(), "HEAD".to_string())
+    }
+
+    #[test]
+    fn test_file_list_status_indicator_colour_does_not_bleed_into_space() {
+        // Regression: the space separator after [M] must not carry the status colour.
+        // A flat (depth-0) file produces: │[M] filename...
+        // Col 0 = border, 1-3 = [M], 4 = space, 5+ = filename.
+        let files = vec![ChangedFile {
+            path: PathBuf::from("main.rs"),
+            status: FileStatus::Modified,
+        }];
+        let app = App::new(files, "main".to_string(), "HEAD".to_string());
+        let backend = TestBackend::new(32, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_file_list(f, &app, f.area())).unwrap();
+        let buf = terminal.backend().buffer();
+        // Row 1 is the first list item (row 0 is the top border).
+        let indicator_fg = buf[(1, 1)].fg; // '[' of [M]
+        let space_fg     = buf[(4, 1)].fg; // separator space after [M]
+        assert_eq!(indicator_fg, Color::Yellow, "[M] bracket must be coloured yellow for Modified");
+        assert_ne!(space_fg, Color::Yellow, "separator space after [M] must not be coloured");
     }
 
     #[test]
