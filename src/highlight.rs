@@ -65,11 +65,14 @@ impl SyntaxHighlighter {
             .unwrap_or("");
         let (syntax, syntax_set) = self.find_syntax(extension);
 
-        let mut h = HighlightLines::new(syntax, &self.theme);
-
         diff.hunks
             .iter()
             .map(|hunk| {
+                // Fresh highlighter per hunk: hunks are non-contiguous excerpts of the
+                // file, so the grammar state from one hunk's last line is not the
+                // correct starting state for the next hunk. Carrying state over produces
+                // garbled tokenisation for stateful grammars (TypeScript, Svelte, etc.).
+                let mut h = HighlightLines::new(syntax, &self.theme);
                 hunk.lines
                     .iter()
                     .map(|dl| {
