@@ -1,4 +1,5 @@
-use crate::diff::{DiffLine, LineKind};
+use crate::diff::LineKind;
+use crate::segment::RichLine;
 use super::{App, FeedbackNote, Mode, FOLD_THRESHOLD};
 
 /// Visual rows occupied by one note entry in the notes panel.
@@ -22,20 +23,20 @@ pub(crate) fn visual_rows_for_diff_line(content: &str, panel_width: usize) -> us
     (total + panel_width - 1) / panel_width
 }
 
-/// Count the visual lines a slice of diff lines occupies when context runs are folded.
+/// Count the visual lines a slice of rich lines occupies when context runs are folded.
 /// Runs of context lines >= FOLD_THRESHOLD collapse to a single placeholder line.
 /// `panel_width` is passed to `visual_rows_for_diff_line` for non-context (changed) lines;
 /// context lines are assumed short and counted as 1 row each.
-pub(super) fn context_run_visual_lines(lines: &[DiffLine], panel_width: usize) -> usize {
+pub(super) fn context_run_visual_lines(lines: &[RichLine], panel_width: usize) -> usize {
     let mut count = 0;
     let mut ctx_run = 0;
     for line in lines {
-        if line.kind == LineKind::Context {
+        if line.diff_line.kind == LineKind::Context {
             ctx_run += 1;
         } else {
             count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
             ctx_run = 0;
-            count += visual_rows_for_diff_line(&line.content, panel_width);
+            count += visual_rows_for_diff_line(&line.diff_line.content, panel_width);
         }
     }
     count += if ctx_run >= FOLD_THRESHOLD { 1 } else { ctx_run };
@@ -43,10 +44,10 @@ pub(super) fn context_run_visual_lines(lines: &[DiffLine], panel_width: usize) -
 }
 
 /// True if the given lines contain at least one context run long enough to fold.
-pub(super) fn hunk_has_foldable_context(lines: &[DiffLine]) -> bool {
+pub(super) fn hunk_has_foldable_context(lines: &[RichLine]) -> bool {
     let mut ctx_run = 0;
     for line in lines {
-        if line.kind == LineKind::Context {
+        if line.diff_line.kind == LineKind::Context {
             ctx_run += 1;
             if ctx_run >= FOLD_THRESHOLD {
                 return true;
@@ -122,7 +123,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::test_helpers::{app_with_diff, make_lines};
+    use crate::app::test_helpers::{app_with_diff, make_rich_lines};
     use crate::app::Mode;
     use crate::diff::LineKind;
     use crate::app::FOLD_THRESHOLD;
@@ -212,13 +213,13 @@ mod tests {
 
     #[test]
     fn test_context_run_visual_lines_short_run_shown_as_is() {
-        let lines = make_lines(&[LineKind::Context; 3]);
+        let lines = make_rich_lines(&[LineKind::Context; 3]);
         assert_eq!(context_run_visual_lines(&lines, 0), 3);
     }
 
     #[test]
     fn test_context_run_visual_lines_long_run_folds_to_one() {
-        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
+        let lines = make_rich_lines(&[LineKind::Context; FOLD_THRESHOLD]);
         assert_eq!(context_run_visual_lines(&lines, 0), 1);
     }
 
@@ -229,20 +230,20 @@ mod tests {
         kinds.push(LineKind::Added);
         kinds.extend(vec![LineKind::Context; FOLD_THRESHOLD]);
         kinds.push(LineKind::Added);
-        let lines = make_lines(&kinds);
+        let lines = make_rich_lines(&kinds);
         // visual: 1 + 2 + 1 + 1(fold) + 1 = 6
         assert_eq!(context_run_visual_lines(&lines, 0), 6);
     }
 
     #[test]
     fn test_hunk_has_foldable_context_false_when_below_threshold() {
-        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD - 1]);
+        let lines = make_rich_lines(&[LineKind::Context; FOLD_THRESHOLD - 1]);
         assert!(!hunk_has_foldable_context(&lines));
     }
 
     #[test]
     fn test_hunk_has_foldable_context_true_at_threshold() {
-        let lines = make_lines(&[LineKind::Context; FOLD_THRESHOLD]);
+        let lines = make_rich_lines(&[LineKind::Context; FOLD_THRESHOLD]);
         assert!(hunk_has_foldable_context(&lines));
     }
 

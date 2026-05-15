@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::diff::{ChangedFile, FileStatus};
@@ -203,16 +204,19 @@ pub fn parse_name_status(output: &str) -> Vec<ChangedFile> {
         };
 
         // Renames produce two tab-separated paths: "old_path\tnew_path".
-        // We only need the new path for display and diffing.
-        let path = if status == FileStatus::Renamed {
-            path_str.splitn(2, '\t').nth(1).unwrap_or(path_str)
+        let (path, old_path) = if status == FileStatus::Renamed {
+            let mut parts = path_str.splitn(2, '\t');
+            let old = parts.next().unwrap_or(path_str);
+            let new = parts.next().unwrap_or(path_str);
+            (new, Some(PathBuf::from(old)))
         } else {
-            path_str
+            (path_str, None)
         };
 
         files.push(ChangedFile {
             path: path.into(),
             status,
+            old_path,
         });
     }
 
@@ -279,17 +283,27 @@ mod tests {
         let files = parse_name_status(input);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].status, FileStatus::Renamed);
-        assert_eq!(files[0].path, std::path::PathBuf::from("src/new.rs"));
+        assert_eq!(files[0].path, PathBuf::from("src/new.rs"));
+        assert_eq!(files[0].old_path, Some(PathBuf::from("src/old.rs")));
     }
 
     #[test]
-    fn test_parse_name_status_renamed_discards_old_path() {
+    fn test_parse_name_status_renamed_captures_old_path() {
         let input = "R075\tsrc/utils/old_name.rs\tsrc/utils/new_name.rs\n";
         let files = parse_name_status(input);
         assert_eq!(files.len(), 1);
-        // Must not contain the old path in any form
-        assert!(!files[0].path.to_string_lossy().contains("old_name"));
         assert_eq!(files[0].path.to_string_lossy(), "src/utils/new_name.rs");
+        assert_eq!(
+            files[0].old_path.as_ref().unwrap().to_string_lossy(),
+            "src/utils/old_name.rs"
+        );
+    }
+
+    #[test]
+    fn test_parse_name_status_non_renamed_has_no_old_path() {
+        let input = "M\tsrc/main.rs\n";
+        let files = parse_name_status(input);
+        assert!(files[0].old_path.is_none());
     }
 
     #[test]

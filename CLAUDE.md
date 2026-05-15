@@ -39,6 +39,18 @@ New code must be structured so it can be tested without a real terminal, real gi
 
 If you find yourself writing logic inside a function that shells out or renders to the terminal, stop and extract it.
 
+### Prefer types over primitives
+
+Avoid primitive obsession. When a value has a specific structure, rules, or invariants, give it a type that encodes that intent — don't pass it as a raw `String`, `usize`, or tuple. Types are the first layer of documentation: a well-named type tells the reader what a value *is*, not just what Rust allows it to hold.
+
+Concrete guidelines:
+- **Named structs over tuples.** `SegmentRange { start: usize, end: usize }` is clearer than `(usize, usize)` and prevents transposing arguments.
+- **Newtypes for constrained values.** If a `u32` is always a 1-based line number, make it `LineNumber(u32)`. If a `String` must be a valid hunk header, make it `HunkHeader(String)`.
+- **Enums over booleans for state.** `LineKind::Added | Removed | Context` already follows this. A function parameter `is_selected: bool` is weaker than `SelectionState::Selected | Unselected`.
+- **Rich domain types over stringly-typed data.** The goal is that the type alone communicates what the value represents and what operations are valid on it.
+
+This applies throughout the codebase. When in doubt, introduce the type — the cost is a line or two of `struct`/`impl`; the benefit is self-documenting code and compiler-enforced correctness.
+
 ### Unsafe code
 
 Do not write `unsafe` Rust unless there is genuinely no safe alternative **and** a human has explicitly approved the decision in conversation. Before reaching for `unsafe`:

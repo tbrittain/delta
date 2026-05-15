@@ -89,9 +89,11 @@ fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     log::debug!("[ui] load_current_file: file_diff result={}", match &result {
         Ok(s) => format!("Ok({} bytes)", s.len()), Err(e) => format!("Err({e})")
     });
-    app.current_diff = result.ok().map(|raw| crate::diff::parse_diff(&raw, file));
-    app.current_highlights = app.current_diff.as_ref().map(|d| app.highlighter.highlight_diff(d));
-    log::debug!("[ui] load_current_file: current_diff={}", match &app.current_diff {
+    app.current_rich_diff = result.ok().map(|raw| {
+        let diff = crate::diff::parse_diff(&raw, file);
+        app.highlighter.enrich(&diff)
+    });
+    log::debug!("[ui] load_current_file: current_rich_diff={}", match &app.current_rich_diff {
         Some(d) => format!("Some({} hunks)", d.hunks.len()), None => "None".into()
     });
 }
@@ -171,7 +173,7 @@ fn run_event_loop<G: GitBackend>(
                                 app.select_file(prev);
                                 app.sync_tree_cursor_to_file();
                                 load_current_file(app, git);
-                                if let Some(ref diff) = app.current_diff {
+                                if let Some(ref diff) = app.current_rich_diff {
                                     if !diff.hunks.is_empty() {
                                         app.selected_hunk = diff.hunks.len() - 1;
                                         app.scroll_to_selected_hunk();
@@ -221,7 +223,7 @@ fn run_event_loop<G: GitBackend>(
                     },
                     _ => {}
                 }
-                if app.focused_panel == Panel::FileList && app.current_diff.is_none() {
+                if app.focused_panel == Panel::FileList && app.current_rich_diff.is_none() {
                     load_current_file(app, git);
                 }
             }
@@ -345,7 +347,7 @@ fn jump_to_note<G: GitBackend>(app: &mut App, git: &G) {
     app.select_file(file_idx);
     app.sync_tree_cursor_to_file();
     load_current_file(app, git);
-    if let Some(hunk_idx) = app.current_diff.as_ref()
+    if let Some(hunk_idx) = app.current_rich_diff.as_ref()
         .and_then(|d| d.hunks.iter().position(|h| h.header == target_header))
     {
         app.selected_hunk = hunk_idx;

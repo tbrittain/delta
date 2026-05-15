@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::diff::{ChangedFile, DiffFile};
+use crate::diff::ChangedFile;
 use crate::filetree::{TreeItem, build_tree};
 use crate::git::WhitespaceMode;
+use crate::segment::RichDiffFile;
 
 mod layout;
 mod navigation;
@@ -55,8 +56,7 @@ pub struct App {
     pub files: Vec<ChangedFile>,
     pub selected_file: usize,
     pub focused_panel: Panel,
-    pub current_diff: Option<DiffFile>,
-    pub current_highlights: Option<crate::highlight::DiffHighlights>,
+    pub current_rich_diff: Option<RichDiffFile>,
     pub highlighter: crate::highlight::SyntaxHighlighter,
     pub diff_scroll: usize,
     pub selected_hunk: usize,
@@ -100,8 +100,7 @@ impl App {
             files,
             selected_file: 0,
             focused_panel: Panel::FileList,
-            current_diff: None,
-            current_highlights: None,
+            current_rich_diff: None,
             highlighter: crate::highlight::SyntaxHighlighter::new(),
             diff_scroll: 0,
             selected_hunk: 0,
@@ -132,8 +131,7 @@ impl App {
             self.selected_file = idx;
             self.diff_scroll = 0;
             self.selected_hunk = 0;
-            self.current_diff = None;
-            self.current_highlights = None;
+            self.current_rich_diff = None;
             self.expanded_hunks.clear();
         }
     }
@@ -143,7 +141,9 @@ impl App {
 #[cfg(test)]
 pub(crate) mod test_helpers {
     use super::{App, Mode};
-    use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::diff::{ChangedFile, DiffLine, FileStatus, LineKind};
+    use crate::segment::{RichDiffFile, RichHunk, RichLine, Segment};
+    use ratatui::style::Color;
     use std::path::PathBuf;
 
     pub(crate) fn make_files(n: usize) -> Vec<ChangedFile> {
@@ -151,45 +151,49 @@ pub(crate) mod test_helpers {
             .map(|i| ChangedFile {
                 path: PathBuf::from(format!("file_{}.rs", i)),
                 status: FileStatus::Modified,
+                old_path: None,
             })
             .collect()
     }
 
-    pub(crate) fn make_hunk(header: &str) -> Hunk {
-        Hunk {
+    /// Build a `RichLine` with a single segment (no syntax splitting).
+    /// Used by test helpers that don't need accurate syntax coloring.
+    pub(crate) fn make_rich_line(dl: DiffLine) -> RichLine {
+        let fg = match dl.kind {
+            LineKind::Added   => Color::Green,
+            LineKind::Removed => Color::Red,
+            LineKind::Context => Color::Gray,
+        };
+        let bg = match dl.kind {
+            LineKind::Added   => Some(Color::Rgb(0, 60, 0)),
+            LineKind::Removed => Some(Color::Rgb(70, 0, 0)),
+            LineKind::Context => None,
+        };
+        let seg = Segment { content: dl.content.clone(), fg, bg };
+        RichLine { diff_line: dl, segments: vec![seg] }
+    }
+
+    pub(crate) fn make_rich_hunk(header: &str) -> RichHunk {
+        let lines = vec![
+            DiffLine { old_lineno: None,    new_lineno: Some(1), kind: LineKind::Added,   content: "new line".to_string() },
+            DiffLine { old_lineno: Some(1), new_lineno: None,    kind: LineKind::Removed, content: "old line".to_string() },
+            DiffLine { old_lineno: Some(2), new_lineno: Some(2), kind: LineKind::Context, content: "context".to_string()  },
+        ];
+        RichHunk {
             header: header.to_string(),
             old_start: 1,
             new_start: 1,
-            lines: vec![
-                DiffLine {
-                    old_lineno: None,
-                    new_lineno: Some(1),
-                    kind: LineKind::Added,
-                    content: "new line".to_string(),
-                },
-                DiffLine {
-                    old_lineno: Some(1),
-                    new_lineno: None,
-                    kind: LineKind::Removed,
-                    content: "old line".to_string(),
-                },
-                DiffLine {
-                    old_lineno: Some(2),
-                    new_lineno: Some(2),
-                    kind: LineKind::Context,
-                    content: "context".to_string(),
-                },
-            ],
+            lines: lines.into_iter().map(make_rich_line).collect(),
         }
     }
 
     pub(crate) fn app_with_diff(hunk_count: usize) -> App {
         let files = make_files(1);
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
             hunks: (0..hunk_count)
-                .map(|i| make_hunk(&format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1)))
+                .map(|i| make_rich_hunk(&format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1)))
                 .collect(),
         });
         app
@@ -255,17 +259,21 @@ pub(crate) mod test_helpers {
 
     pub(crate) fn dir_files() -> Vec<ChangedFile> {
         vec![
-            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified, old_path: None },
         ]
     }
 
-    pub(crate) fn make_lines(kinds: &[LineKind]) -> Vec<DiffLine> {
-        kinds.iter().map(|k| DiffLine {
-            old_lineno: Some(1),
-            new_lineno: Some(1),
-            kind: k.clone(),
-            content: "x".to_string(),
+    /// Build `RichLine`s from a list of `LineKind`s with placeholder content.
+    /// Used by layout tests that only care about line kinds and visual row counts.
+    pub(crate) fn make_rich_lines(kinds: &[LineKind]) -> Vec<RichLine> {
+        kinds.iter().map(|k| {
+            make_rich_line(DiffLine {
+                old_lineno: Some(1),
+                new_lineno: Some(1),
+                kind: k.clone(),
+                content: "x".to_string(),
+            })
         }).collect()
     }
 }

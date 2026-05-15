@@ -106,9 +106,20 @@ pub(super) fn flatten(
             }
             Node::File(idx) => {
                 let file = &files[*idx];
-                let display_name = file.path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| file.path.display().to_string());
+                let display_name = match &file.old_path {
+                    Some(old) => {
+                        let old_name = old.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| old.display().to_string());
+                        let new_name = file.path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| file.path.display().to_string());
+                        format!("{} → {}", old_name, new_name)
+                    }
+                    None => file.path.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| file.path.display().to_string()),
+                };
                 result.push(TreeItem::File {
                     file_idx:  *idx,
                     display_name,

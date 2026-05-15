@@ -65,7 +65,7 @@ impl App {
     /// Returns (file_path, hunk_header) for the currently selected hunk, or None.
     /// Used as a lookup key for notes on the current hunk.
     fn current_hunk_identity(&self) -> Option<(PathBuf, String)> {
-        let diff = self.current_diff.as_ref()?;
+        let diff = self.current_rich_diff.as_ref()?;
         let hunk = diff.hunks.get(self.selected_hunk)?;
         Some((diff.file.path.clone(), hunk.header.clone()))
     }
@@ -116,7 +116,7 @@ impl App {
     // ── Comment flow ─────────────────────────────────────────────────────────
 
     pub fn start_comment(&mut self) {
-        if self.current_diff.as_ref().map(|d| !d.hunks.is_empty()).unwrap_or(false) {
+        if self.current_rich_diff.as_ref().map(|d| !d.hunks.is_empty()).unwrap_or(false) {
             if self.current_hunk_has_note() {
                 self.edit_note_for_current_hunk();
             } else {
@@ -136,18 +136,18 @@ impl App {
         if let Mode::Comment { hunk_idx, ref input, .. } = self.mode.clone() {
             let trimmed = input.trim().to_string();
             if !trimmed.is_empty() {
-                if let Some(ref diff) = self.current_diff {
+                if let Some(ref diff) = self.current_rich_diff {
                     if let Some(hunk) = diff.hunks.get(hunk_idx) {
                         let hunk_content = hunk
                             .lines
                             .iter()
-                            .map(|l| {
-                                let prefix = match l.kind {
-                                    LineKind::Added => "+",
+                            .map(|rl| {
+                                let prefix = match rl.diff_line.kind {
+                                    LineKind::Added   => "+",
                                     LineKind::Removed => "-",
                                     LineKind::Context => " ",
                                 };
-                                format!("{}{}", prefix, l.content)
+                                format!("{}{}", prefix, rl.diff_line.content)
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
@@ -184,7 +184,7 @@ impl App {
 mod tests {
     use crate::app::{App, Mode};
     use crate::app::test_helpers::*;
-    use crate::diff::DiffFile;
+    use crate::segment::RichDiffFile;
     use std::path::PathBuf;
 
     // ── Comment flow ──────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn test_start_comment_no_op_with_empty_hunks() {
         let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: make_files(1).remove(0),
             hunks: vec![],
         });

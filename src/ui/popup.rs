@@ -32,7 +32,7 @@ pub(super) fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
     let popup = Rect { x: area.x + rel.x, y: area.y + rel.y, width: rel.width, height: rel.height };
     frame.render_widget(Clear, popup);
 
-    let hunk_header = app.current_diff.as_ref()
+    let hunk_header = app.current_rich_diff.as_ref()
         .and_then(|d| d.hunks.get(hunk_idx))
         .map(|h| h.header.clone())
         .unwrap_or_default();
@@ -90,24 +90,21 @@ pub(super) fn render_comment_popup(frame: &mut Frame, app: &App, area: Rect) {
 mod tests {
     use super::*;
     use crate::app::{App, Mode};
-    use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::app::test_helpers::make_rich_hunk;
+    use crate::diff::{ChangedFile, FileStatus};
+    use crate::segment::RichDiffFile;
     use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
 
     fn make_app(hunk_count: usize) -> App {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = crate::app::Panel::DiffView;
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: (0..hunk_count).map(|i| Hunk {
-                header: format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1),
-                old_start: (i * 10 + 1) as u32, new_start: (i * 10 + 1) as u32,
-                lines: vec![
-                    DiffLine { old_lineno: None,    new_lineno: Some(1), kind: LineKind::Added,   content: "new line".to_string() },
-                    DiffLine { old_lineno: Some(1), new_lineno: None,    kind: LineKind::Removed, content: "old line".to_string() },
-                ],
-            }).collect(),
+            hunks: (0..hunk_count).map(|i| make_rich_hunk(
+                &format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1)
+            )).collect(),
         });
         app
     }

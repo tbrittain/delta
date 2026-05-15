@@ -7,6 +7,7 @@ use delta::app::App;
 use delta::diff::{ChangedFile, FileStatus, LineKind, parse_diff};
 use delta::export;
 use delta::git::{GitBackend, SystemGit, WhitespaceMode};
+use delta::highlight::SyntaxHighlighter;
 
 // ── Git integration layer ─────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ fn test_file_diff_for_added_file_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
+    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added, old_path: None };
     let diff = parse_diff(&raw, file);
     for hunk in &diff.hunks {
         for line in &hunk.lines {
@@ -115,7 +116,7 @@ fn test_parse_diff_main_rs_has_one_hunk() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
     assert_eq!(diff.hunks.len(), 1);
 }
@@ -125,7 +126,7 @@ fn test_parse_diff_main_rs_has_added_and_removed_lines() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let hunk = &diff.hunks[0];
@@ -142,7 +143,7 @@ fn test_parse_diff_main_rs_added_line_content() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let added_contents: Vec<&str> = diff.hunks[0]
@@ -164,7 +165,7 @@ fn test_parse_diff_lib_rs_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/lib.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let removed = diff.hunks.iter()
@@ -179,7 +180,7 @@ fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
+    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added, old_path: None };
     let diff = parse_diff(&raw, file);
 
     assert!(!diff.hunks.is_empty());
@@ -191,7 +192,7 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     for hunk in &diff.hunks {
@@ -322,10 +323,10 @@ fn test_pipeline_loads_and_parses_diff_into_app() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
-    assert!(app.current_diff.is_some());
-    assert!(!app.current_diff.as_ref().unwrap().hunks.is_empty());
+    assert!(app.current_rich_diff.is_some());
+    assert!(!app.current_rich_diff.as_ref().unwrap().hunks.is_empty());
 }
 
 #[test]
@@ -342,7 +343,7 @@ fn test_pipeline_comment_and_markdown_export() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
     // Simulate the user pressing 'c' and submitting a comment
     app.start_comment();
@@ -373,7 +374,7 @@ fn test_pipeline_comment_and_json_export() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
     app.start_comment();
     if let delta::app::Mode::Comment { ref mut input, .. } = app.mode {

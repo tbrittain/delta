@@ -105,7 +105,7 @@ mod tests {
     use crate::diff::FileStatus;
 
     fn file(path: &str) -> ChangedFile {
-        ChangedFile { path: PathBuf::from(path), status: FileStatus::Modified }
+        ChangedFile { path: PathBuf::from(path), status: FileStatus::Modified, old_path: None }
     }
 
     fn no_notes() -> HashSet<PathBuf> { HashSet::new() }
@@ -234,5 +234,39 @@ mod tests {
         let files = vec![file("src/a.rs"), file("src/b.rs")];
         let items = build_tree(&files, &no_notes(), &no_collapse());
         assert!(matches!(&items[0], TreeItem::Dir { has_notes: false, .. }));
+    }
+
+    // ── Rename display ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_renamed_file_shows_old_and_new_name() {
+        let files = vec![ChangedFile {
+            path: PathBuf::from("src/new_name.rs"),
+            status: FileStatus::Renamed,
+            old_path: Some(PathBuf::from("src/old_name.rs")),
+        }];
+        let items = build_tree(&files, &no_notes(), &no_collapse());
+        // File is inside src/ → tree has Dir + File
+        let file_item = items.iter().find(|i| i.file_idx().is_some()).unwrap();
+        if let TreeItem::File { display_name, .. } = file_item {
+            assert!(display_name.contains("old_name.rs"), "should show old name; got: {display_name}");
+            assert!(display_name.contains("→"),           "should contain arrow; got: {display_name}");
+            assert!(display_name.contains("new_name.rs"), "should show new name; got: {display_name}");
+        } else {
+            panic!("expected File item");
+        }
+    }
+
+    #[test]
+    fn test_non_renamed_file_shows_only_filename() {
+        let files = vec![file("src/main.rs")];
+        let items = build_tree(&files, &no_notes(), &no_collapse());
+        let file_item = items.iter().find(|i| i.file_idx().is_some()).unwrap();
+        if let TreeItem::File { display_name, .. } = file_item {
+            assert_eq!(display_name, "main.rs");
+            assert!(!display_name.contains("→"));
+        } else {
+            panic!("expected File item");
+        }
     }
 }
