@@ -42,8 +42,6 @@ Within modified lines (consecutive removed/added pairs in a hunk), the specific 
 
 Pairs are matched 1:1 by position within each removed/added run. Pure additions and pure deletions with no counterpart receive no intraline highlight. Context lines are never highlighted. The diffing uses character granularity (each Unicode scalar value is a diff unit), so single-character changes within multi-byte sequences are reported precisely.
 
-**Implementation:** `src/segment.rs` — `Segment`, `ByteRange`, `apply_fg_ranges`, `apply_bg_ranges`; `src/intraline.rs` — `pair_hunk_lines`, `compute_intraline_map`; `src/highlight.rs` — `SyntaxHighlighter::enrich`.
-
 ### Context folding
 
 Consecutive runs of 6 or more unchanged context lines are collapsed by default into a placeholder:
@@ -106,8 +104,6 @@ The diff is inline (unified diff style). Some reviewers find side-by-side easier
 - Split view would divide the diff panel: old content left, new content right
 
 **Priority:** Post-MVP. Non-trivial — requires significant layout and rendering changes.
-
----
 
 ---
 

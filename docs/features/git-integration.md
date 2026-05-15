@@ -34,7 +34,7 @@ Files are shown with status indicators:
 | `[D]` | Deleted | Red |
 | `[R]` | Renamed | Cyan |
 
-For renamed files, delta displays the **new path**. The old path is not shown.
+For renamed files, delta displays `old_name.rs → new_name.rs` so both the old and new filename are visible. The old path is captured from `git diff --name-status` and stored in `ChangedFile.old_path`.
 
 ### No-TTY behaviour
 
@@ -58,10 +58,6 @@ Implementation: `git show <ref>:<path>` then extract the requested lines in Rust
 ---
 
 ## Known issues / open feedback
-
-### Renamed file display
-
-The file list shows `old_name.rs → new_name.rs` for renamed files. Both the old and new filenames are shown so a reviewer can immediately see what changed. The old path is captured from the `R\told\tnew` columns that `git diff --name-status` emits and stored in `ChangedFile.old_path`.
 
 ### Windows: diff view shows "No diff content"
 
