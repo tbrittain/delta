@@ -8,6 +8,22 @@ use crate::diff::LineKind;
 use crate::highlight::HighlightedSpan;
 use super::{ACCENT, MUTED, NOTE_FG};
 
+/// Expand tabs to 4 spaces and strip carriage returns so that control
+/// characters in source-code content do not corrupt terminal layout.
+/// Tabs are terminal-interpreted (jump to tab stops), not fixed-width;
+/// \r moves the cursor to column 0 — both produce garbled rendering.
+fn render_safe(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\t' => out.push_str("    "),
+            '\r' => {}
+            c    => out.push(c),
+        }
+    }
+    out
+}
+
 pub(super) fn push_diff_line(
     dl: &crate::diff::DiffLine,
     highlights: Option<&[HighlightedSpan]>,
@@ -36,7 +52,7 @@ pub(super) fn push_diff_line(
                     Some(b) => Style::default().fg(token.fg).bg(b),
                     None    => Style::default().fg(token.fg),
                 };
-                spans.push(Span::styled(token.content.clone(), style));
+                spans.push(Span::styled(render_safe(&token.content), style));
             }
         }
         _ => {
@@ -49,7 +65,7 @@ pub(super) fn push_diff_line(
                 Some(b) => Style::default().fg(fallback_fg).bg(b),
                 None    => Style::default().fg(fallback_fg),
             };
-            spans.push(Span::styled(dl.content.clone(), style));
+            spans.push(Span::styled(render_safe(&dl.content), style));
         }
     }
     out.push(Line::from(spans));
@@ -206,6 +222,50 @@ mod tests {
         app.submit_comment();
         let c = text_str(&build_diff_text(&app, 20));
         assert!(c.contains("…") && !c.contains(&"a".repeat(21)));
+    }
+
+    #[test]
+    fn test_tab_chars_expanded_in_fallback_rendering() {
+        // Tab chars in dl.content must become spaces — literal \t causes terminal
+        // tab-stop jumps that produce garbled layout on real terminals.
+        let mut app = make_app(1);
+        if let Some(ref mut diff) = app.current_diff {
+            diff.hunks[0].lines[0].content = "\t\tsome\tcontent".to_string();
+        }
+        let text = build_diff_text(&app, 1000);
+        let full: String = text.lines.iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(!full.contains('\t'), "tab chars must not reach the terminal");
+        assert!(full.contains("        some    content"), "tabs should expand to 4 spaces each");
+    }
+
+    #[test]
+    fn test_tab_chars_expanded_in_highlighted_rendering() {
+        use crate::highlight::HighlightedSpan;
+        use ratatui::style::Color;
+        let mut app = make_app(1);
+        app.current_highlights = Some(vec![vec![vec![
+            HighlightedSpan { content: "\t\tsome\tcontent".to_string(), fg: Color::White },
+        ]]]);
+        let text = build_diff_text(&app, 1000);
+        let full: String = text.lines.iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(!full.contains('\t'), "tab chars in highlights must not reach the terminal");
+    }
+
+    #[test]
+    fn test_carriage_returns_stripped() {
+        let mut app = make_app(1);
+        if let Some(ref mut diff) = app.current_diff {
+            diff.hunks[0].lines[0].content = "content\r".to_string();
+        }
+        let text = build_diff_text(&app, 1000);
+        let full: String = text.lines.iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(!full.contains('\r'), "carriage returns must be stripped before terminal output");
     }
 
     #[test]
