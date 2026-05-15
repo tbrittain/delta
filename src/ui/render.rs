@@ -109,13 +109,13 @@ pub(super) fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
     };
     // Use the loaded file's path so the title stays in sync with the diff
     // content. Falling back to selected_file only when nothing is loaded yet.
-    let file_name = app.current_diff
+    let file_name = app.current_rich_diff
         .as_ref()
         .map(|d| d.file.path.display().to_string())
         .or_else(|| app.files.get(app.selected_file).map(|f| f.path.display().to_string()))
         .unwrap_or_else(|| "Diff".to_string());
     let ws_label = app.whitespace_mode.label();
-    let title = match &app.current_diff {
+    let title = match &app.current_rich_diff {
         Some(diff) if !diff.hunks.is_empty() =>
             format!(" {} — {}/{}{} ", file_name, app.selected_hunk + 1, diff.hunks.len(), ws_label),
         _ => format!(" {}{} ", file_name, ws_label),
@@ -269,8 +269,10 @@ mod tests {
     use super::super::diff_render::build_diff_text;
     use super::super::popup::render_comment_popup;
     use crate::app::{App, FeedbackNote, Mode, Panel};
-    use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::app::test_helpers::{make_rich_hunk, make_rich_line};
+    use crate::diff::{ChangedFile, DiffLine, FileStatus, LineKind};
     use crate::git::WhitespaceMode;
+    use crate::segment::{RichDiffFile, RichHunk};
     use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
 
@@ -278,16 +280,11 @@ mod tests {
         let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = Panel::DiffView;
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: (0..hunk_count).map(|i| Hunk {
-                header: format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1),
-                old_start: (i * 10 + 1) as u32, new_start: (i * 10 + 1) as u32,
-                lines: vec![
-                    DiffLine { old_lineno: None,    new_lineno: Some(1), kind: LineKind::Added,   content: "new line".to_string() },
-                    DiffLine { old_lineno: Some(1), new_lineno: None,    kind: LineKind::Removed, content: "old line".to_string() },
-                ],
-            }).collect(),
+            hunks: (0..hunk_count).map(|i| make_rich_hunk(
+                &format!("@@ -{},3 +{},4 @@", i * 10 + 1, i * 10 + 1)
+            )).collect(),
         });
         app
     }
@@ -317,15 +314,12 @@ mod tests {
         let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = Panel::DiffView;
-        app.current_diff = Some(DiffFile {
+        let dl = DiffLine { old_lineno: None, new_lineno: Some(1), kind: LineKind::Added, content: content.to_string() };
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: vec![Hunk {
-                header: "@@ -1,1 +1,1 @@".to_string(),
-                old_start: 1, new_start: 1,
-                lines: vec![DiffLine {
-                    old_lineno: None, new_lineno: Some(1),
-                    kind: LineKind::Added, content: content.to_string(),
-                }],
+            hunks: vec![RichHunk {
+                header: "@@ -1,1 +1,1 @@".to_string(), old_start: 1, new_start: 1,
+                lines: vec![make_rich_line(dl)],
             }],
         });
         app

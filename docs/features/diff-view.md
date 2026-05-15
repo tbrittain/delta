@@ -36,6 +36,14 @@ When the diff content is taller than the visible panel, a narrow scroll indicato
 
 The active hunk is marked with a bold cyan `▶` before its header. Non-selected hunks are indented two spaces to preserve alignment. The panel title shows `filename — N/M` so you always know your position.
 
+### Character-level intraline diff
+
+Within modified lines (consecutive removed/added pairs in a hunk), the specific characters that changed are highlighted with a brighter background — brighter green for added chars, brighter red for removed chars — layered on top of the line-level background and syntax colours.
+
+Pairs are matched 1:1 by position within each removed/added run. Pure additions and pure deletions with no counterpart receive no intraline highlight. Context lines are never highlighted. The diffing uses character granularity (each Unicode scalar value is a diff unit), so single-character changes within multi-byte sequences are reported precisely.
+
+**Implementation:** `src/segment.rs` — `Segment`, `ByteRange`, `apply_fg_ranges`, `apply_bg_ranges`; `src/intraline.rs` — `pair_hunk_lines`, `compute_intraline_map`; `src/highlight.rs` — `SyntaxHighlighter::enrich`.
+
 ### Context folding
 
 Consecutive runs of 6 or more unchanged context lines are collapsed by default into a placeholder:
@@ -100,15 +108,6 @@ The diff is inline (unified diff style). Some reviewers find side-by-side easier
 **Priority:** Post-MVP. Non-trivial — requires significant layout and rendering changes.
 
 ---
-
-### No word-level diff highlighting
-
-Lines are highlighted by change type but not at the word or token level. On a modified line, the entire line is red or green; the specific words that changed are not called out.
-
-**Possible directions:**
-- `similar` crate (pure Rust) for word-level diff between the old and new version of each changed line, rendered as intra-line highlights
-
-**Priority:** Post-MVP. Complements syntax highlighting; best implemented alongside or after it.
 
 ---
 

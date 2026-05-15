@@ -4,4 +4,6 @@ pub mod export;
 pub mod filetree;
 pub mod git;
 pub mod highlight;
+pub mod intraline;
+pub mod segment;
 pub mod ui;

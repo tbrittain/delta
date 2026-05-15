@@ -7,6 +7,7 @@ use delta::app::App;
 use delta::diff::{ChangedFile, FileStatus, LineKind, parse_diff};
 use delta::export;
 use delta::git::{GitBackend, SystemGit, WhitespaceMode};
+use delta::highlight::SyntaxHighlighter;
 
 // ── Git integration layer ─────────────────────────────────────────────────────
 
@@ -322,10 +323,10 @@ fn test_pipeline_loads_and_parses_diff_into_app() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
-    assert!(app.current_diff.is_some());
-    assert!(!app.current_diff.as_ref().unwrap().hunks.is_empty());
+    assert!(app.current_rich_diff.is_some());
+    assert!(!app.current_rich_diff.as_ref().unwrap().hunks.is_empty());
 }
 
 #[test]
@@ -342,7 +343,7 @@ fn test_pipeline_comment_and_markdown_export() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
     // Simulate the user pressing 'c' and submitting a comment
     app.start_comment();
@@ -373,7 +374,7 @@ fn test_pipeline_comment_and_json_export() {
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
-    app.current_diff = Some(parse_diff(&raw, file));
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
 
     app.start_comment();
     if let delta::app::Mode::Comment { ref mut input, .. } = app.mode {

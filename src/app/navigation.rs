@@ -137,7 +137,7 @@ impl App {
     }
 
     pub fn next_hunk(&mut self) {
-        if let Some(ref diff) = self.current_diff {
+        if let Some(ref diff) = self.current_rich_diff {
             if self.selected_hunk + 1 < diff.hunks.len() {
                 self.selected_hunk += 1;
                 self.scroll_to_selected_hunk();
@@ -169,7 +169,7 @@ impl App {
     /// True when `]` should cross to the next file: we are on the last hunk of the
     /// current file and there is at least one more visible file in the tree.
     pub fn at_last_hunk_boundary(&self) -> bool {
-        let Some(ref diff) = self.current_diff else { return false };
+        let Some(ref diff) = self.current_rich_diff else { return false };
         !diff.hunks.is_empty()
             && self.selected_hunk + 1 >= diff.hunks.len()
             && self.next_file_in_tree().is_some()
@@ -178,7 +178,7 @@ impl App {
     /// True when `[` should cross to the previous file: we are on the first hunk of
     /// the current file and there is at least one earlier visible file in the tree.
     pub fn at_first_hunk_boundary(&self) -> bool {
-        let Some(ref diff) = self.current_diff else { return false };
+        let Some(ref diff) = self.current_rich_diff else { return false };
         !diff.hunks.is_empty() && self.selected_hunk == 0 && self.prev_file_in_tree().is_some()
     }
 
@@ -190,14 +190,14 @@ impl App {
     /// Compute the rendered line offset of `target_hunk` within the diff view.
     /// Accounts for folded context runs so hunk-jump scrolls to the right position.
     fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
-        let Some(ref diff) = self.current_diff else { return 0 };
+        let Some(ref diff) = self.current_rich_diff else { return 0 };
         let pw = self.diff_view_content_width;
         let mut offset = 0;
         for (i, hunk) in diff.hunks.iter().enumerate() {
             if i >= target_hunk { break; }
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                hunk.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
+                hunk.lines.iter().map(|l| visual_rows_for_diff_line(&l.diff_line.content, pw)).sum()
             } else {
                 context_run_visual_lines(&hunk.lines, pw)
             };
@@ -213,12 +213,12 @@ impl App {
     /// Total rendered line count for the current diff, used to cap scroll and drive the scrollbar.
     /// Accounts for folded context runs and per-line visual row counts when wrap is on.
     pub(crate) fn diff_content_lines(&self) -> usize {
-        let Some(ref diff) = self.current_diff else { return 0 };
+        let Some(ref diff) = self.current_rich_diff else { return 0 };
         let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
             let is_expanded = self.expanded_hunks.contains(&i);
             let content_lines = if is_expanded {
-                h.lines.iter().map(|l| visual_rows_for_diff_line(&l.content, pw)).sum()
+                h.lines.iter().map(|l| visual_rows_for_diff_line(&l.diff_line.content, pw)).sum()
             } else {
                 context_run_visual_lines(&h.lines, pw)
             };
@@ -240,7 +240,7 @@ impl App {
 
     /// True if the selected hunk has any context run long enough to fold.
     pub fn selected_hunk_is_foldable(&self) -> bool {
-        let Some(ref diff) = self.current_diff else { return false };
+        let Some(ref diff) = self.current_rich_diff else { return false };
         let Some(hunk) = diff.hunks.get(self.selected_hunk) else { return false };
         hunk_has_foldable_context(&hunk.lines)
     }
@@ -250,8 +250,9 @@ impl App {
 mod tests {
     use crate::app::{App, Mode, FeedbackNote};
     use crate::app::test_helpers::*;
-    use crate::diff::{ChangedFile, DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::diff::{ChangedFile, FileStatus};
     use crate::git::WhitespaceMode;
+    use crate::segment::RichDiffFile;
     use std::path::PathBuf;
 
     // ── Whitespace mode ───────────────────────────────────────────────────────
@@ -472,9 +473,9 @@ mod tests {
     fn test_at_last_hunk_boundary_true_when_last_hunk_and_more_files() {
         let files = make_files(2);
         let mut app = app_at_file(0);
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+            hunks: vec![make_rich_hunk("@@ -1,1 +1,1 @@")],
         });
         app.selected_hunk = 0;
         assert!(app.at_last_hunk_boundary());
@@ -490,9 +491,9 @@ mod tests {
     fn test_at_last_hunk_boundary_false_when_last_file() {
         let files = make_files(1);
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+            hunks: vec![make_rich_hunk("@@ -1,1 +1,1 @@")],
         });
         assert!(!app.at_last_hunk_boundary(), "no next file — should not cross");
     }
@@ -507,9 +508,9 @@ mod tests {
     fn test_at_first_hunk_boundary_true_when_first_hunk_and_not_first_file() {
         let files = make_files(2);
         let mut app = app_at_file(1);
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[1].clone(),
-            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+            hunks: vec![make_rich_hunk("@@ -1,1 +1,1 @@")],
         });
         assert!(app.at_first_hunk_boundary());
     }
@@ -518,9 +519,9 @@ mod tests {
     fn test_at_first_hunk_boundary_false_when_first_file() {
         let files = make_files(2);
         let mut app = app_at_file(0);
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[0].clone(),
-            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+            hunks: vec![make_rich_hunk("@@ -1,1 +1,1 @@")],
         });
         assert!(!app.at_first_hunk_boundary(), "already at first file — should not cross");
     }
@@ -529,9 +530,9 @@ mod tests {
     fn test_at_first_hunk_boundary_false_when_not_first_hunk() {
         let files = make_files(2);
         let mut app = app_at_file(1);
-        app.current_diff = Some(DiffFile {
+        app.current_rich_diff = Some(RichDiffFile {
             file: files[1].clone(),
-            hunks: vec![make_hunk("@@ -1,1 +1,1 @@"), make_hunk("@@ -5,1 +5,1 @@")],
+            hunks: vec![make_rich_hunk("@@ -1,1 +1,1 @@"), make_rich_hunk("@@ -5,1 +5,1 @@")],
         });
         app.selected_hunk = 1;
         assert!(!app.at_first_hunk_boundary());
@@ -646,17 +647,18 @@ mod tests {
 
     #[test]
     fn test_visual_rows_context_line_accounting_in_scroll() {
+        use crate::diff::{DiffLine, LineKind};
+        use crate::segment::RichDiffFile;
+
         let mut app = app_with_diff(0);
         let long_content = "x".repeat(75);
-        app.current_diff = Some(DiffFile {
+        let dl = DiffLine { old_lineno: None, new_lineno: Some(1), kind: LineKind::Added, content: long_content };
+        app.current_rich_diff = Some(RichDiffFile {
             file: make_files(1).remove(0),
-            hunks: vec![Hunk {
+            hunks: vec![crate::segment::RichHunk {
                 header: "@@ -1,1 +1,1 @@".to_string(),
                 old_start: 1, new_start: 1,
-                lines: vec![DiffLine {
-                    old_lineno: None, new_lineno: Some(1),
-                    kind: LineKind::Added, content: long_content,
-                }],
+                lines: vec![make_rich_line(dl)],
             }],
         });
         // Without wrap: 1 header + 1 line + 0 notes + 1 blank = 3
