@@ -392,7 +392,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             .border_style(border_style)
             .border_type(border_type)
             .style(Style::default().bg(app.highlighter.panel_bg))
-            .title(format!(" Files ({}) ", app.files.len())))
+            .title(format!(" Files ({}) · {}..{} ", app.files.len(), app.from, app.to)))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED).add_modifier(Modifier::BOLD));
     let mut state = ListState::default();
     state.select(Some(app.file_tree_cursor));

@@ -354,7 +354,7 @@ fn test_pipeline_comment_and_markdown_export() {
     assert_eq!(app.notes.len(), 1);
 
     // Export and verify structure
-    let md = export::to_markdown(&app.notes);
+    let md = export::to_markdown(&app.notes, FixtureRepo::FROM_REF, FixtureRepo::TO_REF);
     assert!(md.contains("main.rs"), "export should reference the file");
     assert!(md.contains("This logging is too verbose"), "export should contain the note text");
     assert!(md.contains("@@"), "export should include the hunk header");
@@ -381,7 +381,7 @@ fn test_pipeline_comment_and_json_export() {
     }
     app.submit_comment();
 
-    let json = export::to_json(&app.notes).unwrap();
+    let json = export::to_json(&app.notes, FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let note = &parsed["notes"][0];
 

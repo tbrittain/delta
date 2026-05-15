@@ -105,9 +105,9 @@ fn run_tui(args: &Args) -> Result<()> {
     }
 
     let output = if args.json {
-        export::to_json(&notes)?
+        export::to_json(&notes, &args.from, &args.to)?
     } else {
-        export::to_markdown(&notes)
+        export::to_markdown(&notes, &args.from, &args.to)
     };
 
     match &args.output {
