@@ -52,6 +52,18 @@ The panel only appears in the Tab cycle when at least one note exists. Deleting 
 
 ## Planned improvements
 
+### Ref range indicator
+
+The file list panel title currently shows only the file count (` Files (5) `). It should also show the `<from>..<to>` ref range so the reviewer always knows what they are comparing without having to remember the command they ran.
+
+**Possible directions:**
+- Append to the panel title: ` Files (5) · HEAD^..HEAD `
+- Or a secondary line / subtitle below the title if the panel width is too narrow
+
+**Notes:** `App` already stores `from` and `to` as public fields — no backend work needed. The change is purely in `render_file_list`.
+
+---
+
 ### Find in files (Ctrl+F, file list focused)
 **Goal:** Filter the file list to files whose paths match a typed string. The list narrows as you type. `Esc` clears and restores the full list.
 
