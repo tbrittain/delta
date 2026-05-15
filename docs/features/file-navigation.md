@@ -22,6 +22,7 @@ The panel title shows the total file count and the diff range: ` Files (5) · HE
 | Key | Action |
 |---|---|
 | `↑` / `↓` | Move selection up/down |
+| `←` / `→` | Scroll file names horizontally (capped at the longest overflow) |
 | `Enter` | Open the selected file's diff and switch to the diff panel |
 | `Tab` | Switch focus to the diff panel |
 
@@ -72,17 +73,6 @@ All navigation is keyboard-only. Mouse clicks, scroll wheel, and text selection 
 - Click-to-position cursor in comment input
 
 **Priority:** Post-MVP. Would improve accessibility and feel more natural for users less comfortable with keyboard-only TUIs.
-
----
-
-### File list clips long paths
-
-File paths longer than the file list panel width (32 chars) are clipped with no way to see the full path.
-
-**Possible directions:**
-- Horizontal scroll in the file list (`←`/`→` when file list is focused)
-
-**Priority:** Low. Only affects repos with deeply nested paths.
 
 ---
 
