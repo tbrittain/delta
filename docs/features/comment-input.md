@@ -60,6 +60,14 @@ Comments attach to a whole hunk. There is no way to select specific changed line
 
 ---
 
+### Word wrap breaks words mid-word
+
+When a line of text in the comment popup reaches the panel edge, the wrap currently splits at the character boundary — a long word is cut and continued on the next visual line. The preferred behaviour is **whole-word wrapping**: the entire word that would overflow is pushed down to the next line, matching standard editor and text-box conventions.
+
+**Priority:** Low friction improvement, no data model changes needed. Affects only the visual line layout in the popup renderer.
+
+---
+
 ### No mouse click-to-position in the comment popup
 
 The cursor can be moved only by keyboard. Clicking inside the popup to reposition the cursor is not supported.

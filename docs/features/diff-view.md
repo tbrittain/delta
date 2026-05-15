@@ -8,7 +8,7 @@ The right panel shows the unified diff for the currently selected file. Lines ar
 - **Red background** (`-`) — removed lines
 - **No background** (` `) — context lines (unchanged)
 
-Language syntax is highlighted using the `syntect` crate (base16-ocean.dark theme, Sublime Text grammars). The language is detected from the file extension; unknown extensions fall back to plain text. Syntax foreground colors are layered on top of the change-type background so both signals are visible simultaneously.
+Language syntax is highlighted using the `syntect` crate (base16-ocean.dark theme, Sublime Text grammars) extended by `two-face` for languages not in the default Sublime bundle. The language is detected from the file extension; unknown extensions fall back to plain text. Syntax foreground colors are layered on top of the change-type background so both signals are visible simultaneously. Supported extensions include all syntect defaults plus TypeScript (`.ts`), TSX/JSX (`.tsx`, `.jsx`), TOML, Dockerfile, and 200+ others from `two-face`.
 
 Line numbers appear in dark gray to the left of each line, showing the new file line number for added/context lines and the old file line number for removed lines.
 
@@ -116,6 +116,3 @@ The diff view always uses soft word wrap (`Wrap { trim: false }`). There is no w
 
 ---
 
-### ~~Syntax highlighting missing for TypeScript and JSX/TSX~~ _(fixed in 0.4.0)_
-
-Resolved by adding the `two-face` crate, which extends syntect's default grammar set with 200+ extra syntaxes. `.ts`, `.tsx`, and `.jsx` are now fully highlighted using TypeScript grammars. `.vue`, `.svelte`, TOML, Dockerfile, and many others also benefit. The extra set is checked before the syntect default set in `highlight.rs`.
