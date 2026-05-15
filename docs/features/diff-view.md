@@ -16,6 +16,22 @@ Line numbers appear in dark gray to the left of each line, showing the new file 
 
 Each file's diff is divided into **hunks** — contiguous regions of change with surrounding context. Navigate between them with `[` (previous) and `]` (next).
 
+### Whitespace-sensitivity
+
+Press `w` in the diff view to cycle through three whitespace modes:
+
+| Mode | Flag | Effect |
+|---|---|---|
+| (none, default) | — | All changes shown |
+| `-b` | `git diff -b` | Ignore changes in whitespace amount |
+| `-w` | `git diff -w` | Ignore all whitespace |
+
+The active mode appears in the diff panel title (e.g., `filename — 1/3 (-b)`) and in the status bar. Changing the mode immediately re-fetches and re-renders the diff for the current file.
+
+### Scroll-position indicator
+
+When the diff content is taller than the visible panel, a narrow scroll indicator appears on the right edge of the diff panel. The thumb position and size show the current viewport location relative to the total diff height.
+
 The active hunk is marked with a bold cyan `▶` before its header. Non-selected hunks are indented two spaces to preserve alignment. The panel title shows `filename — N/M` so you always know your position.
 
 ### Context folding
@@ -38,14 +54,6 @@ Long lines wrap at the panel boundary (`Wrap { trim: false }`). The gutter (line
 
 ## Planned improvements
 
-### Whitespace-sensitivity flags (`-w` / `-b`)
-**Goal:** Let the reviewer control whether whitespace-only changes appear in the diff.
-
-- `git diff -w` — ignores all whitespace; lines differing only in spacing become invisible.
-- `git diff -b` — ignores whitespace *changes* but not the presence/absence of whitespace. Less aggressive than `-w`.
-
-**UX:** `w` key cycles `none → -b → -w → none`. The active flag appears in the diff panel title. Changing it re-fetches the file diff with the flag appended to the `git diff` invocation. See `git-integration.md` for the backend changes needed.
-
 ### Full-file view with collapsed gaps
 **Goal:** View the entire file, not just the changed hunks. Unchanged sections between hunks collapse by default with a line-count placeholder; expanding one loads those lines from git.
 
@@ -57,9 +65,6 @@ Default view stays diff-only; full-file is opt-in per file. See `git-integration
 **Goal:** Incremental text search over the visible diff content. Matches are highlighted; `n` / `N` jumps between them. `Esc` clears.
 
 **Notes:** Match against rendered line content (not raw bytes). Use a distinct highlight color separate from the selection color.
-
-### Scroll-position indicator
-**Goal:** A narrow indicator on the right edge of the diff panel showing the current viewport position relative to total diff content — like a scrollbar or minimap. Gives spatial context when navigating long diffs.
 
 ### Go to line (Ctrl+G)
 **Goal:** A small modal (like the comment popup) where the reviewer types a line number. The diff view scrolls to and selects the hunk containing that line.
