@@ -13,9 +13,27 @@ pub struct SystemGit {
 }
 
 impl SystemGit {
-    /// Use the current working directory as the repository root.
+    /// Resolve the git repo root starting from the current working directory.
     pub fn new() -> Self {
-        Self { repo_dir: std::path::PathBuf::from(".") }
+        Self::new_at(std::path::Path::new("."))
+    }
+
+    /// Resolve the git repo root starting from `start`, then run all git commands from
+    /// that root. This ensures that file paths returned by `--name-status` (which are
+    /// always relative to the repo root) are valid pathspecs for subsequent `git diff`
+    /// calls, regardless of which subdirectory the user ran delta from.
+    pub fn new_at(start: &std::path::Path) -> Self {
+        let repo_dir = Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .current_dir(start)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| std::path::PathBuf::from(s.trim()))
+            .unwrap_or_else(|| start.to_path_buf());
+        log::debug!("[git] repo root resolved to {:?}", repo_dir);
+        Self { repo_dir }
     }
 
     /// Use a specific directory as the repository root.
