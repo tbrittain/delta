@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::diff::{ChangedFile, DiffFile, DiffLine, LineKind};
 use crate::filetree::{TreeItem, build_tree};
+use crate::git::WhitespaceMode;
 
 /// Context runs of this many lines or more are folded by default.
 pub(crate) const FOLD_THRESHOLD: usize = 6;
@@ -81,6 +82,8 @@ pub struct App {
     /// Horizontal scroll offset (in character columns) for the scrollable name portion
     /// of file-list items. Adjusted with ←/→ when the file-list panel is focused.
     pub file_list_h_scroll: usize,
+    /// Active whitespace-sensitivity mode for `git diff`. Cycled with `w` in the diff view.
+    pub whitespace_mode: WhitespaceMode,
 }
 
 impl App {
@@ -108,6 +111,7 @@ impl App {
             collapsed_dirs: HashSet::new(),
             file_tree_cursor: 0,
             file_list_h_scroll: 0,
+            whitespace_mode: WhitespaceMode::None,
         }
     }
 
@@ -147,6 +151,19 @@ impl App {
             if parent == std::path::Path::new("") { break; }
             self.collapsed_dirs.remove(parent);
             current = parent;
+        }
+    }
+
+    /// Select the first file in visual tree order and sync `file_tree_cursor` to match.
+    /// Called once on startup so the highlighted file list entry, `selected_file`, and
+    /// the initial diff load all agree — regardless of the order git returns files.
+    pub fn select_first_tree_file(&mut self) {
+        let tree = self.tree_items();
+        if let Some((pos, idx)) = tree.iter().enumerate().find_map(|(pos, item)| {
+            item.file_idx().map(|idx| (pos, idx))
+        }) {
+            self.selected_file = idx;
+            self.file_tree_cursor = pos;
         }
     }
 
@@ -302,6 +319,11 @@ impl App {
         }).max().unwrap_or(0).saturating_sub(FILE_LIST_INNER_WIDTH)
     }
 
+    /// Advance the whitespace mode one step: None → -b → -w → None.
+    pub fn cycle_whitespace_mode(&mut self) {
+        self.whitespace_mode = self.whitespace_mode.next();
+    }
+
     pub fn diff_scroll_up(&mut self) {
         self.diff_scroll = self.diff_scroll.saturating_sub(3);
     }
@@ -327,6 +349,36 @@ impl App {
             self.selected_hunk -= 1;
             self.scroll_to_selected_hunk();
         }
+    }
+
+    /// Returns the `file_idx` of the next file after the current tree cursor,
+    /// scanning in visual tree order. Returns `None` when already at the last visible file.
+    pub fn next_file_in_tree(&self) -> Option<usize> {
+        let tree = self.tree_items();
+        (self.file_tree_cursor + 1..tree.len()).find_map(|i| tree[i].file_idx())
+    }
+
+    /// Returns the `file_idx` of the previous file before the current tree cursor,
+    /// scanning in visual tree order. Returns `None` when already at the first visible file.
+    pub fn prev_file_in_tree(&self) -> Option<usize> {
+        let tree = self.tree_items();
+        (0..self.file_tree_cursor).rev().find_map(|i| tree[i].file_idx())
+    }
+
+    /// True when `]` should cross to the next file: we are on the last hunk of the
+    /// current file and there is at least one more visible file in the tree.
+    pub fn at_last_hunk_boundary(&self) -> bool {
+        let Some(ref diff) = self.current_diff else { return false };
+        !diff.hunks.is_empty()
+            && self.selected_hunk + 1 >= diff.hunks.len()
+            && self.next_file_in_tree().is_some()
+    }
+
+    /// True when `[` should cross to the previous file: we are on the first hunk of
+    /// the current file and there is at least one earlier visible file in the tree.
+    pub fn at_first_hunk_boundary(&self) -> bool {
+        let Some(ref diff) = self.current_diff else { return false };
+        !diff.hunks.is_empty() && self.selected_hunk == 0 && self.prev_file_in_tree().is_some()
     }
 
     /// Scroll the diff view so the selected hunk is at the top.
@@ -357,9 +409,9 @@ impl App {
         offset
     }
 
-    /// Total rendered line count for the current diff, used to cap scroll.
+    /// Total rendered line count for the current diff, used to cap scroll and drive the scrollbar.
     /// Accounts for folded context runs and per-line visual row counts when wrap is on.
-    fn diff_content_lines(&self) -> usize {
+    pub(crate) fn diff_content_lines(&self) -> usize {
         let Some(ref diff) = self.current_diff else { return 0 };
         let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
@@ -613,6 +665,7 @@ pub(crate) fn delete_selection(
 mod tests {
     use super::*;
     use crate::diff::{DiffFile, DiffLine, FileStatus, Hunk, LineKind};
+    use crate::git::WhitespaceMode;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -663,6 +716,60 @@ mod tests {
                 .collect(),
         });
         app
+    }
+
+    // ── Whitespace mode ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cycle_whitespace_mode() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.whitespace_mode, WhitespaceMode::None);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::IgnoreChanges);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::IgnoreAll);
+        app.cycle_whitespace_mode();
+        assert_eq!(app.whitespace_mode, WhitespaceMode::None);
+    }
+
+    // ── select_first_tree_file ────────────────────────────────────────────────
+
+    #[test]
+    fn test_select_first_tree_file_flat_list() {
+        // Flat list: tree order == file order, so selected_file=0 and cursor=0.
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        assert_eq!(app.selected_file, 0);
+        assert_eq!(app.file_tree_cursor, 0);
+    }
+
+    #[test]
+    fn test_select_first_tree_file_with_dir_at_top() {
+        // Tree: [Dir(src/), File(src/a.rs), File(src/b.rs)]
+        // The first tree item is a directory; first file is at tree position 1.
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        // file_tree_cursor should point at the first file (position 1, after the dir)
+        assert_eq!(app.file_tree_cursor, 1);
+        // selected_file should be the file_idx for src/a.rs
+        assert!(app.files[app.selected_file].path.ends_with("a.rs"));
+    }
+
+    #[test]
+    fn test_select_first_tree_file_syncs_cursor_and_selected_file() {
+        // Verify that both fields are consistent after the call.
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        let tree = app.tree_items();
+        assert_eq!(tree[app.file_tree_cursor].file_idx(), Some(app.selected_file));
     }
 
     // ── File list navigation ──────────────────────────────────────────────────
@@ -964,6 +1071,129 @@ mod tests {
 
         assert_eq!(app.notes.len(), 1);
         assert!(app.notes[0].hunk_header.contains("11")); // second hunk starts at 11
+    }
+
+    // ── Cross-file hunk boundary ──────────────────────────────────────────────
+
+    // Helper: app with two flat files, cursor on file at given index.
+    fn app_at_file(file_idx: usize) -> App {
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.file_tree_cursor = file_idx; // flat tree: cursor == file_idx
+        app.selected_file = file_idx;
+        app
+    }
+
+    #[test]
+    fn test_next_file_in_tree_returns_next_file() {
+        let app = app_at_file(0);
+        assert_eq!(app.next_file_in_tree(), Some(1));
+    }
+
+    #[test]
+    fn test_next_file_in_tree_none_at_last_file() {
+        let app = app_at_file(1);
+        assert_eq!(app.next_file_in_tree(), None);
+    }
+
+    #[test]
+    fn test_prev_file_in_tree_returns_prev_file() {
+        let app = app_at_file(1);
+        assert_eq!(app.prev_file_in_tree(), Some(0));
+    }
+
+    #[test]
+    fn test_prev_file_in_tree_none_at_first_file() {
+        let app = app_at_file(0);
+        assert_eq!(app.prev_file_in_tree(), None);
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_true_when_last_hunk_and_more_files() {
+        let files = make_files(2);
+        let mut app = app_at_file(0);
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        app.selected_hunk = 0;
+        assert!(app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_when_not_last_hunk() {
+        let mut app = app_with_diff(3); // 3 hunks, selected_hunk=0
+        // app_with_diff uses make_files(1) so no next file, but hunk isn't last anyway
+        assert!(!app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_when_last_file() {
+        let files = make_files(1);
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        assert!(!app.at_last_hunk_boundary(), "no next file — should not cross");
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_without_diff() {
+        let app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        assert!(!app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_true_when_first_hunk_and_not_first_file() {
+        let files = make_files(2);
+        let mut app = app_at_file(1);
+        app.current_diff = Some(DiffFile {
+            file: files[1].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        assert!(app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_when_first_file() {
+        let files = make_files(2);
+        let mut app = app_at_file(0);
+        app.current_diff = Some(DiffFile {
+            file: files[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        assert!(!app.at_first_hunk_boundary(), "already at first file — should not cross");
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_when_not_first_hunk() {
+        let files = make_files(2);
+        let mut app = app_at_file(1);
+        app.current_diff = Some(DiffFile {
+            file: files[1].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@"), make_hunk("@@ -5,1 +5,1 @@")],
+        });
+        app.selected_hunk = 1;
+        assert!(!app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_without_diff() {
+        let app = app_at_file(1);
+        assert!(!app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_next_file_in_tree_skips_dirs() {
+        // Tree: [Dir(src/), File(a), File(b)] — cursor on Dir(0), next file is at tree pos 1
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.file_tree_cursor = 0; // cursor on Dir
+        // next visible file from pos 1 onward is src/a.rs at tree pos 1
+        assert!(app.next_file_in_tree().is_some());
     }
 
     // ── Hunk scroll offset ────────────────────────────────────────────────────

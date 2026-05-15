@@ -21,6 +21,8 @@ delta main --json --output out.json # JSON to a file
 ```markdown
 The following are code review notes from a human reviewer. Please address each item before proceeding.
 
+Diff range: `HEAD^..HEAD`
+
 ---
 
 ## `src/auth.rs` · `@@ -42,6 +42,9 @@`
@@ -46,6 +48,7 @@ Structure:
 
 ```json
 {
+  "range": "HEAD^..HEAD",
   "notes": [
     {
       "file": "src/auth.rs",

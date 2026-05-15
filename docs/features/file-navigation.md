@@ -15,7 +15,7 @@ Files are color-coded by status:
 
 A `●` dot appears after the filename when the file has at least one note attached.
 
-The panel title shows the total file count: ` Files (5) `.
+The panel title shows the total file count and the diff range: ` Files (5) · HEAD^..HEAD `.
 
 ### Navigation
 
