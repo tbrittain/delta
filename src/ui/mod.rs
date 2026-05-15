@@ -167,11 +167,10 @@ fn run_event_loop<G: GitBackend>(
                     }
                     KeyCode::Char('[') => {
                         if app.focused_panel == Panel::DiffView {
-                            if app.at_first_hunk_boundary() {
-                                app.select_file(app.selected_file - 1);
+                            if let Some(prev) = app.at_first_hunk_boundary().then(|| app.prev_file_in_tree()).flatten() {
+                                app.select_file(prev);
                                 app.sync_tree_cursor_to_file();
                                 load_current_file(app, git);
-                                // jump to last hunk of the loaded diff
                                 if let Some(ref diff) = app.current_diff {
                                     if !diff.hunks.is_empty() {
                                         app.selected_hunk = diff.hunks.len() - 1;
@@ -185,8 +184,8 @@ fn run_event_loop<G: GitBackend>(
                     }
                     KeyCode::Char(']') => {
                         if app.focused_panel == Panel::DiffView {
-                            if app.at_last_hunk_boundary() {
-                                app.select_file(app.selected_file + 1);
+                            if let Some(next) = app.at_last_hunk_boundary().then(|| app.next_file_in_tree()).flatten() {
+                                app.select_file(next);
                                 app.sync_tree_cursor_to_file();
                                 load_current_file(app, git);
                                 // selected_hunk is already 0 from load_current_file
