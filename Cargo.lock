@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "delta"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -334,6 +334,7 @@ dependencies = [
  "simplelog",
  "syntect",
  "tempfile",
+ "two-face",
 ]
 
 [[package]]
@@ -1285,6 +1286,17 @@ checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "two-face"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b285c51f8a6ade109ed4566d33ac4fb289fb5d6cf87ed70908a5eaf65e948e34"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "syntect",
 ]
 
 [[package]]

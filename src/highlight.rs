@@ -1,7 +1,7 @@
 use ratatui::style::Color;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::diff::DiffFile;
 
@@ -14,7 +14,8 @@ pub struct HighlightedSpan {
 pub type DiffHighlights = Vec<Vec<Vec<HighlightedSpan>>>;
 
 pub struct SyntaxHighlighter {
-    syntax_set: SyntaxSet,
+    default_set: SyntaxSet,
+    extra_set: SyntaxSet,
     theme: Theme,
     /// Theme background color, used to enforce the diff panel background.
     pub panel_bg: Color,
@@ -22,13 +23,33 @@ pub struct SyntaxHighlighter {
 
 impl SyntaxHighlighter {
     pub fn new() -> Self {
-        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let default_set = SyntaxSet::load_defaults_newlines();
+        let extra_set = two_face::syntax::extra_newlines();
         let theme_set = ThemeSet::load_defaults();
         let theme = theme_set.themes["base16-ocean.dark"].clone();
         // Darker than the theme's own background so the panel feels closer to a
         // proper dark editor pane rather than the theme's medium-dark default.
         let panel_bg = Color::Rgb(18, 20, 26);
-        Self { syntax_set, theme, panel_bg }
+        Self { default_set, extra_set, theme, panel_bg }
+    }
+
+    /// Returns the best syntax and the SyntaxSet it belongs to.
+    ///
+    /// The extra set (TypeScript grammars) is checked first. `.jsx` is
+    /// aliased to the TypeScriptReact grammar since it covers JSX syntax.
+    fn find_syntax<'a>(&'a self, extension: &str) -> (&'a SyntaxReference, &'a SyntaxSet) {
+        // .jsx shares JSX syntax with .tsx; use TypeScriptReact for both.
+        let lookup_ext = if extension == "jsx" { "tsx" } else { extension };
+
+        if let Some(syn) = self.extra_set.find_syntax_by_extension(lookup_ext) {
+            return (syn, &self.extra_set);
+        }
+
+        let syn = self
+            .default_set
+            .find_syntax_by_extension(extension)
+            .unwrap_or_else(|| self.default_set.find_syntax_plain_text());
+        (syn, &self.default_set)
     }
 
     pub fn highlight_diff(&self, diff: &DiffFile) -> DiffHighlights {
@@ -38,10 +59,7 @@ impl SyntaxHighlighter {
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
-        let syntax = self
-            .syntax_set
-            .find_syntax_by_extension(extension)
-            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
+        let (syntax, syntax_set) = self.find_syntax(extension);
 
         let mut h = HighlightLines::new(syntax, &self.theme);
 
@@ -53,7 +71,7 @@ impl SyntaxHighlighter {
                     .map(|dl| {
                         let line_with_newline = format!("{}\n", dl.content);
                         let ranges = h
-                            .highlight_line(&line_with_newline, &self.syntax_set)
+                            .highlight_line(&line_with_newline, syntax_set)
                             .unwrap_or_default();
                         ranges
                             .iter()
@@ -193,5 +211,40 @@ mod tests {
         assert!(!highlights[0][0].is_empty(), "added line should produce spans");
         assert!(!highlights[0][1].is_empty(), "removed line should produce spans");
         assert!(!highlights[0][2].is_empty(), "context line should produce spans");
+    }
+
+    // TypeScript-specific syntax (type annotation) produces multiple spans, confirming
+    // the TypeScript grammar is active rather than the plain-text fallback.
+    #[test]
+    fn test_highlight_ts_produces_colored_spans() {
+        let hl = SyntaxHighlighter::new();
+        let diff = make_diff("src/app.ts", vec![added("const x: number = 1;")]);
+        let highlights = hl.highlight_diff(&diff);
+        let spans = &highlights[0][0];
+        assert!(spans.len() > 1, ".ts should produce multiple spans, got {}", spans.len());
+        let joined: String = spans.iter().map(|s| s.content.as_str()).collect();
+        assert_eq!(joined, "const x: number = 1;");
+    }
+
+    #[test]
+    fn test_highlight_tsx_produces_colored_spans() {
+        let hl = SyntaxHighlighter::new();
+        let diff = make_diff("src/App.tsx", vec![added("const x: number = 1;")]);
+        let highlights = hl.highlight_diff(&diff);
+        let spans = &highlights[0][0];
+        assert!(spans.len() > 1, ".tsx should produce multiple spans, got {}", spans.len());
+        let joined: String = spans.iter().map(|s| s.content.as_str()).collect();
+        assert_eq!(joined, "const x: number = 1;");
+    }
+
+    #[test]
+    fn test_highlight_jsx_produces_colored_spans() {
+        let hl = SyntaxHighlighter::new();
+        let diff = make_diff("src/Button.jsx", vec![added("const x = () => <div />;")]);
+        let highlights = hl.highlight_diff(&diff);
+        let spans = &highlights[0][0];
+        assert!(spans.len() > 1, ".jsx should produce multiple spans, got {}", spans.len());
+        let joined: String = spans.iter().map(|s| s.content.as_str()).collect();
+        assert_eq!(joined, "const x = () => <div />;");
     }
 }
