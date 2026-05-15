@@ -66,6 +66,7 @@ pub fn run<G: GitBackend>(
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(files, from.to_string(), to.to_string());
+    app.select_first_tree_file();
     load_current_file(&mut app, git);
 
     let result = run_event_loop(&mut terminal, &mut app, git);

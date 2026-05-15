@@ -154,6 +154,19 @@ impl App {
         }
     }
 
+    /// Select the first file in visual tree order and sync `file_tree_cursor` to match.
+    /// Called once on startup so the highlighted file list entry, `selected_file`, and
+    /// the initial diff load all agree — regardless of the order git returns files.
+    pub fn select_first_tree_file(&mut self) {
+        let tree = self.tree_items();
+        if let Some((pos, idx)) = tree.iter().enumerate().find_map(|(pos, item)| {
+            item.file_idx().map(|idx| (pos, idx))
+        }) {
+            self.selected_file = idx;
+            self.file_tree_cursor = pos;
+        }
+    }
+
     /// Move `file_tree_cursor` to the position of `selected_file` in the visible tree.
     /// Called after a jump-to-note so the file list cursor tracks the loaded file.
     pub fn sync_tree_cursor_to_file(&mut self) {
@@ -717,6 +730,46 @@ mod tests {
         assert_eq!(app.whitespace_mode, WhitespaceMode::IgnoreAll);
         app.cycle_whitespace_mode();
         assert_eq!(app.whitespace_mode, WhitespaceMode::None);
+    }
+
+    // ── select_first_tree_file ────────────────────────────────────────────────
+
+    #[test]
+    fn test_select_first_tree_file_flat_list() {
+        // Flat list: tree order == file order, so selected_file=0 and cursor=0.
+        let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        assert_eq!(app.selected_file, 0);
+        assert_eq!(app.file_tree_cursor, 0);
+    }
+
+    #[test]
+    fn test_select_first_tree_file_with_dir_at_top() {
+        // Tree: [Dir(src/), File(src/a.rs), File(src/b.rs)]
+        // The first tree item is a directory; first file is at tree position 1.
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        // file_tree_cursor should point at the first file (position 1, after the dir)
+        assert_eq!(app.file_tree_cursor, 1);
+        // selected_file should be the file_idx for src/a.rs
+        assert!(app.files[app.selected_file].path.ends_with("a.rs"));
+    }
+
+    #[test]
+    fn test_select_first_tree_file_syncs_cursor_and_selected_file() {
+        // Verify that both fields are consistent after the call.
+        let files = vec![
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+        ];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        app.select_first_tree_file();
+        let tree = app.tree_items();
+        assert_eq!(tree[app.file_tree_cursor].file_idx(), Some(app.selected_file));
     }
 
     // ── File list navigation ──────────────────────────────────────────────────
