@@ -208,6 +208,32 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
     }
 }
 
+// ── Subdirectory invocation ───────────────────────────────────────────────────
+//
+// Regression: when delta is run from inside a repo subdirectory, git diff
+// --name-status returns paths relative to the repo root, but a subsequent
+// `git diff -- <path>` executed from the subdirectory interprets the pathspec
+// relative to cwd, so nothing matches and stdout is empty.  new_at() resolves
+// the repo root first so both calls run from the same place.
+
+#[test]
+fn test_changed_files_from_subdirectory() {
+    let repo = FixtureRepo::new();
+    // Simulate delta being run from inside the src/ subdirectory.
+    let git = SystemGit::new_at(&repo.path.join("src"));
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
+    assert_eq!(files.len(), 5, "should enumerate all changed files when run from a repo subdirectory");
+}
+
+#[test]
+fn test_file_diff_from_subdirectory_returns_nonempty() {
+    let repo = FixtureRepo::new();
+    let git = SystemGit::new_at(&repo.path.join("src"));
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs").unwrap();
+    assert!(!raw.is_empty(), "file_diff should return content when run from a repo subdirectory");
+    assert!(raw.contains("@@"), "should contain unified diff hunk marker");
+}
+
 // ── Arbitrary range comparison ────────────────────────────────────────────────
 
 #[test]

@@ -15,6 +15,7 @@ use delta::ui;
 #[derive(Parser, Debug)]
 #[command(
     name = "delta",
+    version,
     about = "Terminal diff review tool for AI-assisted development workflows"
 )]
 struct Args {

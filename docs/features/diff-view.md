@@ -113,3 +113,17 @@ The diff view always uses soft word wrap (`Wrap { trim: false }`). There is no w
 - `w` key toggles between soft-wrap (current) and no-wrap + horizontal scroll (`←`/`→`)
 
 **Priority:** Post-MVP. Soft wrap is a reasonable default; toggle adds flexibility without breaking anything.
+
+---
+
+### Syntax highlighting missing for TypeScript and JSX/TSX
+
+`syntect`'s default grammar set is the built-in Sublime Text bundle. TypeScript is a third-party Sublime package and is **not** included. As a result `.ts`, `.tsx`, and `.jsx` all fall back to plain text — no token colours at all, even for plain TypeScript files.
+
+**Affected extensions confirmed:** `.ts`, `.tsx`, `.jsx`. `.vue` and `.svelte` are almost certainly in the same situation.
+
+**Possible directions:**
+- Bundle additional Sublime Text grammars (TypeScript from `TypeScript-TmLanguage`, JSX from `babel-sublime`) and compile them into the binary at build time via `syntect`'s `build.rs` dump mechanism.
+- Extend the extension → language map to alias `.ts` → JavaScript and `.tsx`/`.jsx` → JavaScript as a quick fallback; highlights will be approximate but better than nothing.
+
+**Priority:** High for front-end codebases. The alias approach is a one-liner improvement; full grammar bundling is higher quality but requires build-time work and binary size consideration.

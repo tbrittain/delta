@@ -7,6 +7,10 @@ use crate::filetree::{TreeItem, build_tree};
 /// Context runs of this many lines or more are folded by default.
 pub(crate) const FOLD_THRESHOLD: usize = 6;
 
+/// Inner width (in terminal columns) of the file-list panel.
+/// File list is rendered at Constraint::Length(32); minus 2 borders = 30.
+pub(crate) const FILE_LIST_INNER_WIDTH: usize = 30;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Panel {
     #[default]
@@ -74,6 +78,9 @@ pub struct App {
     pub collapsed_dirs: HashSet<PathBuf>,
     /// Cursor position within the visible file tree (index into `tree_items()`).
     pub file_tree_cursor: usize,
+    /// Horizontal scroll offset (in character columns) for the scrollable name portion
+    /// of file-list items. Adjusted with ←/→ when the file-list panel is focused.
+    pub file_list_h_scroll: usize,
 }
 
 impl App {
@@ -100,6 +107,7 @@ impl App {
             diff_view_content_width: 0,
             collapsed_dirs: HashSet::new(),
             file_tree_cursor: 0,
+            file_list_h_scroll: 0,
         }
     }
 
@@ -255,6 +263,43 @@ impl App {
             self.file_tree_cursor += 1;
             self.sync_selected_file_from_cursor();
         }
+    }
+
+    pub fn file_list_scroll_right(&mut self) {
+        let cap = self.max_h_scroll();
+        if self.file_list_h_scroll < cap {
+            self.file_list_h_scroll = (self.file_list_h_scroll + 3).min(cap);
+        }
+    }
+
+    pub fn file_list_scroll_left(&mut self) {
+        self.file_list_h_scroll = self.file_list_h_scroll.saturating_sub(3);
+    }
+
+    /// Maximum useful horizontal scroll for the file list: the largest amount by
+    /// which any visible item's content overflows the panel's inner width.
+    /// Returns 0 when all names fit (scrolling would have no effect).
+    fn max_h_scroll(&self) -> usize {
+        self.tree_items().iter().map(|item| {
+            match item {
+                TreeItem::Dir { display_name, file_count, has_notes, depth, .. } => {
+                    let note_w = if *has_notes { 2 } else { 0 };
+                    let content_w = display_name.chars().count()
+                        + 2  // " ("
+                        + file_count.to_string().len()
+                        + 1  // ")"
+                        + note_w;
+                    let prefix_w = depth * 2 + 2; // indent + arrow + space
+                    prefix_w + content_w
+                }
+                TreeItem::File { display_name, has_notes, depth, .. } => {
+                    let note_w = if *has_notes { 2 } else { 0 };
+                    let content_w = display_name.chars().count() + note_w;
+                    let prefix_w = depth * 2 + 4; // indent + "[X] "
+                    prefix_w + content_w
+                }
+            }
+        }).max().unwrap_or(0).saturating_sub(FILE_LIST_INNER_WIDTH)
     }
 
     pub fn diff_scroll_up(&mut self) {
@@ -653,6 +698,73 @@ mod tests {
         let mut app = App::new(make_files(3), "main".to_string(), "HEAD".to_string());
         app.file_list_up();
         assert_eq!(app.file_tree_cursor, 0);
+    }
+
+    #[test]
+    fn test_file_list_scroll_right_increases_h_scroll() {
+        // Need a name that overflows the 30-col inner panel.
+        // depth-0 file prefix = 4 ("[M] "), available for name = 26. 36 chars overflows by 10.
+        let long_name = "a".repeat(36);
+        let files = vec![ChangedFile { path: long_name.into(), status: crate::diff::FileStatus::Modified }];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.file_list_h_scroll, 0);
+        app.file_list_scroll_right();
+        assert_eq!(app.file_list_h_scroll, 3);
+        app.file_list_scroll_right();
+        assert_eq!(app.file_list_h_scroll, 6);
+    }
+
+    #[test]
+    fn test_file_list_scroll_left_decreases_h_scroll() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.file_list_h_scroll = 6;
+        app.file_list_scroll_left();
+        assert_eq!(app.file_list_h_scroll, 3);
+    }
+
+    #[test]
+    fn test_file_list_scroll_left_clamps_at_zero() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.file_list_scroll_left();
+        assert_eq!(app.file_list_h_scroll, 0);
+    }
+
+    #[test]
+    fn test_file_list_scroll_right_does_not_exceed_max_h_scroll() {
+        // A short filename fits inside the 30-column inner width, so max_h_scroll() == 0
+        // and scrolling right should be a no-op.
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        // make_files produces flat files named "file_0" etc. (6 chars), which fit easily.
+        assert_eq!(app.max_h_scroll(), 0, "short name should not allow any scroll");
+        app.file_list_scroll_right();
+        assert_eq!(app.file_list_h_scroll, 0, "scroll should not advance past max");
+    }
+
+    #[test]
+    fn test_file_list_scroll_right_caps_at_overflow_amount() {
+        // Use a filename that overflows the panel width.
+        // inner_width = 30, prefix for a depth-0 file = 4 ("[M] "), so content gets 26 cols.
+        // A 36-char name overflows by 10. max_h_scroll() should return 10.
+        let long_name = "a".repeat(36); // 36 chars > 26 available
+        let files = vec![ChangedFile {
+            path: long_name.clone().into(),
+            status: crate::diff::FileStatus::Modified,
+        }];
+        let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
+        let cap = app.max_h_scroll();
+        assert_eq!(cap, 10, "max scroll should equal the overflow amount");
+        // Scroll past the cap
+        for _ in 0..10 { app.file_list_scroll_right(); }
+        assert_eq!(app.file_list_h_scroll, cap, "h_scroll must not exceed the cap");
+    }
+
+    #[test]
+    fn test_file_list_navigation_does_not_reset_diff_scroll() {
+        // Navigating with ↑/↓ must NOT reset diff_scroll — only an explicit load does.
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.diff_scroll = 50;
+        app.file_list_down();
+        assert_eq!(app.diff_scroll, 50, "navigation alone must not reset diff_scroll");
     }
 
     #[test]
