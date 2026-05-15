@@ -59,14 +59,9 @@ Implementation: `git show <ref>:<path>` then extract the requested lines in Rust
 
 ## Known issues / open feedback
 
-### Renamed file shows new path only
+### Renamed file display
 
-The file list shows `src/renamed.rs` for a rename, with no indication of what the old name was. A reviewer unfamiliar with the codebase may not know what changed.
-
-**Possible directions:**
-- Show `src/old_name.rs → src/renamed.rs` in the file list
-
-**Priority:** Low. Easy to implement; minor UX improvement.
+The file list shows `old_name.rs → new_name.rs` for renamed files. Both the old and new filenames are shown so a reviewer can immediately see what changed. The old path is captured from the `R\told\tnew` columns that `git diff --name-status` emits and stored in `ChangedFile.old_path`.
 
 ### Windows: diff view shows "No diff content"
 

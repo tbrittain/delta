@@ -193,6 +193,7 @@ mod tests {
             file: ChangedFile {
                 path: PathBuf::from(path),
                 status: FileStatus::Modified,
+                old_path: None,
             },
             hunks: vec![Hunk {
                 header: "@@ -1,1 +1,1 @@".to_string(),
@@ -225,7 +226,7 @@ mod tests {
     fn test_enrich_preserves_hunk_and_line_structure() {
         let hl = SyntaxHighlighter::new();
         let diff = DiffFile {
-            file: ChangedFile { path: PathBuf::from("src/lib.rs"), status: FileStatus::Modified },
+            file: ChangedFile { path: PathBuf::from("src/lib.rs"), status: FileStatus::Modified, old_path: None },
             hunks: vec![
                 Hunk { header: "@@ -1,1 +1,2 @@".to_string(), old_start: 1, new_start: 1,
                     lines: vec![added("let x = 1;"), context("// comment")] },

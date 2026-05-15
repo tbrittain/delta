@@ -277,7 +277,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_app_with_hunks(hunk_count: usize) -> App {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = Panel::DiffView;
         app.current_rich_diff = Some(RichDiffFile {
@@ -311,7 +311,7 @@ mod tests {
     }
 
     fn app_with_single_line(content: &str) -> App {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = Panel::DiffView;
         let dl = DiffLine { old_lineno: None, new_lineno: Some(1), kind: LineKind::Added, content: content.to_string() };
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_no_diff_shows_loading() {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let app = App::new(files, "main".to_string(), "HEAD".to_string());
         assert!(text_to_string(&build_diff_text(&app, 1000)).contains("Loading"));
     }
@@ -648,8 +648,8 @@ mod tests {
 
     fn app_with_tree_files() -> App {
         let files = vec![
-            ChangedFile { path: PathBuf::from("src/app.rs"),  status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Added },
+            ChangedFile { path: PathBuf::from("src/app.rs"),  status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Added,    old_path: None },
         ];
         App::new(files, "main".to_string(), "HEAD".to_string())
     }
@@ -659,6 +659,7 @@ mod tests {
         let files = vec![ChangedFile {
             path: PathBuf::from("main.rs"),
             status: FileStatus::Modified,
+            old_path: None,
         }];
         let app = App::new(files, "main".to_string(), "HEAD".to_string());
         let backend = TestBackend::new(32, 5);
@@ -676,6 +677,7 @@ mod tests {
         let files = vec![ChangedFile {
             path: PathBuf::from("main.rs"),
             status: FileStatus::Modified,
+            old_path: None,
         }];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         app.file_list_h_scroll = 4;

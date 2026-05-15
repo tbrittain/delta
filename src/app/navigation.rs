@@ -282,8 +282,8 @@ mod tests {
     #[test]
     fn test_select_first_tree_file_with_dir_at_top() {
         let files = vec![
-            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified, old_path: None },
         ];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         app.select_first_tree_file();
@@ -294,8 +294,8 @@ mod tests {
     #[test]
     fn test_select_first_tree_file_syncs_cursor_and_selected_file() {
         let files = vec![
-            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified, old_path: None },
         ];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         app.select_first_tree_file();
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn test_file_list_scroll_right_increases_h_scroll() {
         let long_name = "a".repeat(36);
-        let files = vec![ChangedFile { path: long_name.into(), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: long_name.into(), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         assert_eq!(app.file_list_h_scroll, 0);
         app.file_list_scroll_right();
@@ -378,6 +378,7 @@ mod tests {
         let files = vec![ChangedFile {
             path: long_name.clone().into(),
             status: FileStatus::Modified,
+            old_path: None,
         }];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         let cap = app.max_h_scroll();
@@ -547,8 +548,8 @@ mod tests {
     #[test]
     fn test_next_file_in_tree_skips_dirs() {
         let files = vec![
-            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified, old_path: None },
         ];
         let mut app = App::new(files, "main".to_string(), "HEAD".to_string());
         app.file_tree_cursor = 0; // cursor on Dir

@@ -151,6 +151,7 @@ pub(crate) mod test_helpers {
             .map(|i| ChangedFile {
                 path: PathBuf::from(format!("file_{}.rs", i)),
                 status: FileStatus::Modified,
+                old_path: None,
             })
             .collect()
     }
@@ -258,8 +259,8 @@ pub(crate) mod test_helpers {
 
     pub(crate) fn dir_files() -> Vec<ChangedFile> {
         vec![
-            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified },
-            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified },
+            ChangedFile { path: PathBuf::from("src/a.rs"), status: FileStatus::Modified, old_path: None },
+            ChangedFile { path: PathBuf::from("src/b.rs"), status: FileStatus::Modified, old_path: None },
         ]
     }
 

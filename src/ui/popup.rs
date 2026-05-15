@@ -97,7 +97,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_app(hunk_count: usize) -> App {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = crate::app::Panel::DiffView;
         app.current_rich_diff = Some(RichDiffFile {

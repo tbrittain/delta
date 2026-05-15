@@ -169,7 +169,7 @@ mod tests {
 
     fn diff_with_hunks(hunks: Vec<Hunk>) -> DiffFile {
         DiffFile {
-            file: ChangedFile { path: PathBuf::from("f.rs"), status: FileStatus::Modified },
+            file: ChangedFile { path: PathBuf::from("f.rs"), status: FileStatus::Modified, old_path: None },
             hunks,
         }
     }

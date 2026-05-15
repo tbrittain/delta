@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_loading_when_no_diff() {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let app = App::new(files, "main".to_string(), "HEAD".to_string());
         assert!(text_str(&build_diff_text(&app, 1000)).contains("Loading"));
     }
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_multi_segment_line_renders_all_content() {
         // A RichLine with two segments (as syntax highlighting would produce)
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = crate::app::Panel::DiffView;
         let dl = DiffLine {
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn test_folded_hunk_placeholder() {
         use crate::app::FOLD_THRESHOLD;
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified }];
+        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
         let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
         app.focused_panel = crate::app::Panel::DiffView;
 

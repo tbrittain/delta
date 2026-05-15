@@ -96,7 +96,7 @@ fn test_file_diff_for_added_file_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
+    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added, old_path: None };
     let diff = parse_diff(&raw, file);
     for hunk in &diff.hunks {
         for line in &hunk.lines {
@@ -116,7 +116,7 @@ fn test_parse_diff_main_rs_has_one_hunk() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
     assert_eq!(diff.hunks.len(), 1);
 }
@@ -126,7 +126,7 @@ fn test_parse_diff_main_rs_has_added_and_removed_lines() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let hunk = &diff.hunks[0];
@@ -143,7 +143,7 @@ fn test_parse_diff_main_rs_added_line_content() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let added_contents: Vec<&str> = diff.hunks[0]
@@ -165,7 +165,7 @@ fn test_parse_diff_lib_rs_has_only_additions() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/lib.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/lib.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     let removed = diff.hunks.iter()
@@ -180,7 +180,7 @@ fn test_parse_diff_new_file_has_hunk_starting_at_line_one() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/new.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added };
+    let file = ChangedFile { path: "src/new.rs".into(), status: FileStatus::Added, old_path: None };
     let diff = parse_diff(&raw, file);
 
     assert!(!diff.hunks.is_empty());
@@ -192,7 +192,7 @@ fn test_parse_diff_added_lines_have_new_line_numbers() {
     let repo = FixtureRepo::new();
     let git = SystemGit::with_dir(&repo.path);
     let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, "src/main.rs", WhitespaceMode::None).unwrap();
-    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified };
+    let file = ChangedFile { path: "src/main.rs".into(), status: FileStatus::Modified, old_path: None };
     let diff = parse_diff(&raw, file);
 
     for hunk in &diff.hunks {

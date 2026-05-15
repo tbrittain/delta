@@ -23,6 +23,8 @@ impl FileStatus {
 pub struct ChangedFile {
     pub path: PathBuf,
     pub status: FileStatus,
+    /// For renamed files, the path the file had before the rename.
+    pub old_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +157,7 @@ mod tests {
         ChangedFile {
             path: PathBuf::from(path),
             status: FileStatus::Modified,
+            old_path: None,
         }
     }
 
