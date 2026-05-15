@@ -54,6 +54,19 @@ Long lines wrap at the panel boundary (`Wrap { trim: false }`). The gutter (line
 
 ## Planned improvements
 
+### Cross-file hunk navigation
+
+`]` at the last hunk of a file should advance to the first hunk of the next file. `[` at the first hunk of a file should jump to the last hunk of the previous file. This makes it possible to review all hunks in the entire diff without ever touching the file list — a single `]` keystroke stream takes you all the way through.
+
+**Implementation notes:**
+- In the `]` handler: when `selected_hunk + 1 == diff.hunks.len()`, call `file_list_down()`, load the new file, and set `selected_hunk = 0`.
+- In the `[` handler: when `selected_hunk == 0`, call `file_list_up()`, load the new file, and set `selected_hunk = diff.hunks.len() - 1` (the last hunk of that file).
+- Loading the new file is asynchronous in the current design (background on file-list navigation); the cross-file jump needs a synchronous load before hunk navigation can happen.
+- The file list cursor must stay in sync (`sync_tree_cursor_to_file`).
+- Already at the first/last file: no-op (clamp behaviour matches current single-file `[`/`]`).
+
+---
+
 ### Full-file view with collapsed gaps
 **Goal:** View the entire file, not just the changed hunks. Unchanged sections between hunks collapse by default with a line-count placeholder; expanding one loads those lines from git.
 
