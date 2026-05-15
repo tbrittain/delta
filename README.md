@@ -131,53 +131,6 @@ export TERMINAL=gnome-terminal   # or xterm, kitty, alacritty, etc.
 
 ---
 
-## Key Bindings
-
-### File list (left panel)
-
-| Key | Action |
-|---|---|
-| `↑` / `↓` | Navigate files |
-| `Enter` | Open file and switch to diff view |
-| `Tab` | Switch to diff panel |
-| `q` | Quit |
-
-### Diff view (right panel)
-
-| Key | Action |
-|---|---|
-| `↑` / `↓` | Scroll |
-| `[` / `]` | Previous / next hunk |
-| `c` | Add comment to current hunk |
-| `e` | Edit existing comment on current hunk |
-| `d` | Delete existing comment on current hunk |
-| `Space` | Expand / fold context lines in current hunk |
-| `Tab` | Switch to file list |
-| `q` | Quit and export feedback |
-
-The panel title shows the current file and hunk position (`filename — 2/5`). The status bar shows `e: edit  d: delete` when the current hunk already has a comment, and `c: comment` otherwise.
-
-### Notes panel (Tab from diff view when notes exist)
-
-| Key | Action |
-|---|---|
-| `↑` / `↓` | Navigate between notes |
-| `Enter` | Jump to the note's file and hunk in the diff view |
-| `Space` | Expand / collapse the full note text |
-| `e` | Jump to the note's hunk and enter edit mode |
-| `d` | Delete the selected note |
-| `Tab` | Return to the diff view |
-
-### Comment input
-
-| Key | Action |
-|---|---|
-| `Enter` | New line |
-| `Ctrl+D` | Submit comment |
-| `Esc` | Cancel |
-
----
-
 ## Export Format
 
 ### Markdown (default)

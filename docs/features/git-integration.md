@@ -76,10 +76,6 @@ The file list shows `src/renamed.rs` for a rename, with no indication of what th
 
 **Priority:** Low. Easy to implement; minor UX improvement.
 
-### No default invocation — `<from>` is required
-
-**Resolved:** `<from>` now defaults to `HEAD~`, so bare `delta` reviews the latest commit. `<to>` continues to default to `HEAD`.
-
 ### Windows: diff view shows "No diff content"
 
 **Resolved:** Fixed in `d2594c4` by passing `--no-ext-diff` to `git diff`, forcing git's built-in unified diff output regardless of any external difftool configured by the user. A configured external difftool produces output in a different format that the parser cannot handle. `--no-ext-diff` bypasses any such configuration and always uses git's built-in unified diff.

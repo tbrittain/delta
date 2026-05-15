@@ -52,14 +52,6 @@ The panel only appears in the Tab cycle when at least one note exists. Deleting 
 
 ## Planned improvements
 
-### Directory tree view
-**Goal:** Replace the flat file list with a proper tree view that mirrors the directory structure of the diff. Directories containing changed files can be expanded or collapsed with a count (e.g. `src/ (3 files)`).
-
-**Notes:**
-- The data model already carries full paths — grouping by directory prefix is the main structural change.
-- Arrow keys and `Enter` should work on both directory nodes and file leaves.
-- The `●` note marker propagates up to directory nodes when any child file has notes.
-
 ### Find in files (Ctrl+F, file list focused)
 **Goal:** Filter the file list to files whose paths match a typed string. The list narrows as you type. `Esc` clears and restores the full list.
 
@@ -80,17 +72,6 @@ All navigation is keyboard-only. Mouse clicks, scroll wheel, and text selection 
 - Click-to-position cursor in comment input
 
 **Priority:** Post-MVP. Would improve accessibility and feel more natural for users less comfortable with keyboard-only TUIs.
-
----
-
-### No version indicator
-
-The currently installed version is not shown anywhere in the TUI. Users must run `delta --version` or check `Cargo.toml` to find it.
-
-**Possible directions:**
-- Show `v0.x.y` in the status bar or a panel title corner
-
-**Priority:** Low. Minor convenience; easy to add.
 
 ---
 
