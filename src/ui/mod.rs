@@ -80,6 +80,8 @@ pub fn run<G: GitBackend>(
 
 fn load_current_file<G: GitBackend>(app: &mut App, git: &G) {
     if app.files.is_empty() { return; }
+    app.diff_scroll = 0;
+    app.selected_hunk = 0;
     let path = app.files[app.selected_file].path.to_string_lossy().to_string();
     let file = app.files[app.selected_file].clone();
     log::debug!("[ui] load_current_file: path={:?}", path);
