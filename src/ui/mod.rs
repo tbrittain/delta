@@ -165,8 +165,36 @@ fn run_event_loop<G: GitBackend>(
                             jump_to_note(app, git);
                         }
                     }
-                    KeyCode::Char('[') => { if app.focused_panel == Panel::DiffView { app.prev_hunk(); } }
-                    KeyCode::Char(']') => { if app.focused_panel == Panel::DiffView { app.next_hunk(); } }
+                    KeyCode::Char('[') => {
+                        if app.focused_panel == Panel::DiffView {
+                            if app.at_first_hunk_boundary() {
+                                app.select_file(app.selected_file - 1);
+                                app.sync_tree_cursor_to_file();
+                                load_current_file(app, git);
+                                // jump to last hunk of the loaded diff
+                                if let Some(ref diff) = app.current_diff {
+                                    if !diff.hunks.is_empty() {
+                                        app.selected_hunk = diff.hunks.len() - 1;
+                                        app.scroll_to_selected_hunk();
+                                    }
+                                }
+                            } else {
+                                app.prev_hunk();
+                            }
+                        }
+                    }
+                    KeyCode::Char(']') => {
+                        if app.focused_panel == Panel::DiffView {
+                            if app.at_last_hunk_boundary() {
+                                app.select_file(app.selected_file + 1);
+                                app.sync_tree_cursor_to_file();
+                                load_current_file(app, git);
+                                // selected_hunk is already 0 from load_current_file
+                            } else {
+                                app.next_hunk();
+                            }
+                        }
+                    }
                     KeyCode::Char('w') => {
                         if app.focused_panel == Panel::DiffView {
                             app.cycle_whitespace_mode();

@@ -338,6 +338,22 @@ impl App {
         }
     }
 
+    /// True when `]` should cross to the next file: we are on the last hunk of the
+    /// current file and there is at least one more file in the list.
+    pub fn at_last_hunk_boundary(&self) -> bool {
+        let Some(ref diff) = self.current_diff else { return false };
+        !diff.hunks.is_empty()
+            && self.selected_hunk + 1 >= diff.hunks.len()
+            && self.selected_file + 1 < self.files.len()
+    }
+
+    /// True when `[` should cross to the previous file: we are on the first hunk of
+    /// the current file and there is at least one earlier file in the list.
+    pub fn at_first_hunk_boundary(&self) -> bool {
+        let Some(ref diff) = self.current_diff else { return false };
+        !diff.hunks.is_empty() && self.selected_hunk == 0 && self.selected_file > 0
+    }
+
     /// Scroll the diff view so the selected hunk is at the top.
     pub fn scroll_to_selected_hunk(&mut self) {
         self.diff_scroll = self.hunk_scroll_offset(self.selected_hunk);
@@ -988,6 +1004,89 @@ mod tests {
 
         assert_eq!(app.notes.len(), 1);
         assert!(app.notes[0].hunk_header.contains("11")); // second hunk starts at 11
+    }
+
+    // ── Cross-file hunk boundary ──────────────────────────────────────────────
+
+    #[test]
+    fn test_at_last_hunk_boundary_true_when_last_hunk_and_more_files() {
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.current_diff = Some(DiffFile {
+            file: make_files(2)[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        app.selected_file = 0;
+        app.selected_hunk = 0; // only hunk → last hunk
+        assert!(app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_when_not_last_hunk() {
+        let mut app = app_with_diff(3); // 3 hunks, selected_hunk=0
+        assert!(!app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_when_last_file() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.current_diff = Some(DiffFile {
+            file: make_files(1)[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        app.selected_file = 0;
+        app.selected_hunk = 0;
+        assert!(!app.at_last_hunk_boundary(), "no next file — should not cross");
+    }
+
+    #[test]
+    fn test_at_last_hunk_boundary_false_without_diff() {
+        let app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        assert!(!app.at_last_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_true_when_first_hunk_and_not_first_file() {
+        let files = make_files(2);
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
+        app.selected_file = 1;
+        app.current_diff = Some(DiffFile {
+            file: files[1].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        app.selected_hunk = 0;
+        assert!(app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_when_first_file() {
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.current_diff = Some(DiffFile {
+            file: make_files(2)[0].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@")],
+        });
+        app.selected_file = 0;
+        app.selected_hunk = 0;
+        assert!(!app.at_first_hunk_boundary(), "already at first file — should not cross");
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_when_not_first_hunk() {
+        let files = make_files(2);
+        let mut app = App::new(files.clone(), "main".to_string(), "HEAD".to_string());
+        app.selected_file = 1;
+        app.current_diff = Some(DiffFile {
+            file: files[1].clone(),
+            hunks: vec![make_hunk("@@ -1,1 +1,1 @@"), make_hunk("@@ -5,1 +5,1 @@")],
+        });
+        app.selected_hunk = 1;
+        assert!(!app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_false_without_diff() {
+        let mut app = App::new(make_files(2), "main".to_string(), "HEAD".to_string());
+        app.selected_file = 1;
+        assert!(!app.at_first_hunk_boundary());
     }
 
     // ── Hunk scroll offset ────────────────────────────────────────────────────
