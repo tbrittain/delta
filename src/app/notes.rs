@@ -135,31 +135,30 @@ impl App {
     pub fn submit_comment(&mut self) {
         if let Mode::Comment { hunk_idx, ref input, .. } = self.mode.clone() {
             let trimmed = input.trim().to_string();
-            if !trimmed.is_empty() {
-                if let Some(ref diff) = self.current_rich_diff {
-                    if let Some(hunk) = diff.hunks.get(hunk_idx) {
-                        let hunk_content = hunk
-                            .lines
-                            .iter()
-                            .map(|rl| {
-                                let prefix = match rl.diff_line.kind {
-                                    LineKind::Added   => "+",
-                                    LineKind::Removed => "-",
-                                    LineKind::Context => " ",
-                                };
-                                format!("{}{}", prefix, rl.diff_line.content)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
+            if !trimmed.is_empty()
+                && let Some(ref diff) = self.current_rich_diff
+                && let Some(hunk) = diff.hunks.get(hunk_idx)
+            {
+                let hunk_content = hunk
+                    .lines
+                    .iter()
+                    .map(|rl| {
+                        let prefix = match rl.diff_line.kind {
+                            LineKind::Added   => "+",
+                            LineKind::Removed => "-",
+                            LineKind::Context => " ",
+                        };
+                        format!("{}{}", prefix, rl.diff_line.content)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
 
-                        self.notes.push(FeedbackNote {
-                            file: diff.file.path.clone(),
-                            hunk_header: hunk.header.clone(),
-                            hunk_content,
-                            note: trimmed,
-                        });
-                    }
-                }
+                self.notes.push(FeedbackNote {
+                    file: diff.file.path.clone(),
+                    hunk_header: hunk.header.clone(),
+                    hunk_content,
+                    note: trimmed,
+                });
             }
         }
         self.comment_scroll = 0;
@@ -169,10 +168,10 @@ impl App {
 
     pub fn cancel_comment(&mut self) {
         // If editing an existing note, restore the original so Esc never loses it.
-        if let Mode::Comment { ref original, .. } = self.mode.clone() {
-            if let Some(note) = original.clone() {
-                self.notes.push(note);
-            }
+        if let Mode::Comment { ref original, .. } = self.mode.clone()
+            && let Some(note) = original.clone()
+        {
+            self.notes.push(note);
         }
         self.comment_scroll = 0;
         self.comment_anchor = None;

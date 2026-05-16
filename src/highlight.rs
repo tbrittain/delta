@@ -54,6 +54,12 @@ pub struct SyntaxHighlighter {
     pub panel_bg: Color,
 }
 
+impl Default for SyntaxHighlighter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyntaxHighlighter {
     pub fn new() -> Self {
         let default_set = SyntaxSet::load_defaults_newlines();

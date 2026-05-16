@@ -45,9 +45,9 @@ const BASE_TO_RENAME: &str = r#"pub fn before_rename() {}
 /// A temporary git repository with a known two-commit history:
 ///
 /// - `HEAD^` (base): src/main.rs, src/lib.rs, src/deleted.rs, src/old_name.rs
-/// - `HEAD`  (tip):  src/main.rs (modified), src/lib.rs (modified),
-///                   src/new.rs (added), src/deleted.rs (deleted),
-///                   src/old_name.rs → src/renamed.rs (renamed)
+/// - `HEAD` (tip): src/main.rs (modified), src/lib.rs (modified),
+///   src/new.rs (added), src/deleted.rs (deleted),
+///   src/old_name.rs → src/renamed.rs (renamed)
 ///
 /// Use `BASE_REF` as the base argument to `SystemGit` methods.
 pub struct FixtureRepo {

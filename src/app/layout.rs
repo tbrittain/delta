@@ -20,7 +20,7 @@ pub(super) fn note_visual_rows(note: &FeedbackNote, expanded: bool) -> usize {
 pub(crate) fn visual_rows_for_diff_line(content: &str, panel_width: usize) -> usize {
     if panel_width == 0 { return 1; }
     let total = 6 + content.chars().count(); // gutter always occupies 6 chars on the first row
-    (total + panel_width - 1) / panel_width
+    total.div_ceil(panel_width)
 }
 
 /// Count the visual lines a slice of rich lines occupies when context runs are folded.
@@ -75,7 +75,7 @@ pub(crate) fn visual_row_for_cursor(input: &str, cursor: usize, content_width: u
             let clamped = if char_count == 0 { 0 } else { char_offset.min(char_count - 1) };
             return visual_row + clamped / cw;
         }
-        visual_row += if char_count == 0 { 1 } else { (char_count + cw - 1) / cw };
+        visual_row += if char_count == 0 { 1 } else { char_count.div_ceil(cw) };
         byte_pos = line_byte_end + 1;
     }
     visual_row.saturating_sub(1)

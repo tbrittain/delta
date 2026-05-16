@@ -1,8 +1,8 @@
-/// File-tree construction for the file-list panel.
-///
-/// Given a flat `&[ChangedFile]` (from the git backend), this module builds
-/// an in-memory directory trie and flattens it into a `Vec<TreeItem>` that
-/// the UI can render with indentation and expand/collapse support.
+//! File-tree construction for the file-list panel.
+//!
+//! Given a flat `&[ChangedFile]` (from the git backend), this module builds
+//! an in-memory directory trie and flattens it into a `Vec<TreeItem>` that
+//! the UI can render with indentation and expand/collapse support.
 
 mod node;
 

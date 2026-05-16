@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::diff::ChangedFile;
 
@@ -24,7 +24,7 @@ pub(super) fn insert_file(
     nodes: &mut Vec<Node>,
     file_idx: usize,
     components: &[Component],
-    parent: &PathBuf,
+    parent: &Path,
 ) {
     match components {
         [] => {}
@@ -34,12 +34,12 @@ pub(super) fn insert_file(
             let dir_path = parent.join(&name);
 
             for node in nodes.iter_mut() {
-                if let Node::Dir(d) = node {
-                    if d.name == name {
-                        let p = d.path.clone();
-                        insert_file(&mut d.children, file_idx, rest, &p);
-                        return;
-                    }
+                if let Node::Dir(d) = node
+                    && d.name == name
+                {
+                    let p = d.path.clone();
+                    insert_file(&mut d.children, file_idx, rest, &p);
+                    return;
                 }
             }
             let mut new_dir = DirNode { name, path: dir_path.clone(), children: Vec::new() };
@@ -49,7 +49,7 @@ pub(super) fn insert_file(
     }
 }
 
-pub(super) fn sort_nodes(nodes: &mut Vec<Node>, files: &[ChangedFile]) {
+pub(super) fn sort_nodes(nodes: &mut [Node], files: &[ChangedFile]) {
     nodes.sort_by(|a, b| match (a, b) {
         (Node::Dir(da), Node::Dir(db)) => da.name.cmp(&db.name),
         (Node::Dir(_),  Node::File(_)) => std::cmp::Ordering::Less,

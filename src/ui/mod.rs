@@ -144,15 +144,11 @@ fn run_event_loop<G: GitBackend>(
                         }
                         Panel::NotesView => { app.notes_down(); app.scroll_notes_to_selected(8); }
                     },
-                    KeyCode::Left => {
-                        if app.focused_panel == Panel::FileList {
-                            app.file_list_scroll_left();
-                        }
+                    KeyCode::Left if app.focused_panel == Panel::FileList => {
+                        app.file_list_scroll_left();
                     }
-                    KeyCode::Right => {
-                        if app.focused_panel == Panel::FileList {
-                            app.file_list_scroll_right();
-                        }
+                    KeyCode::Right if app.focused_panel == Panel::FileList => {
+                        app.file_list_scroll_right();
                     }
                     KeyCode::Enter => {
                         if app.focused_panel == Panel::FileList {
@@ -167,42 +163,36 @@ fn run_event_loop<G: GitBackend>(
                             jump_to_note(app, git);
                         }
                     }
-                    KeyCode::Char('[') => {
-                        if app.focused_panel == Panel::DiffView {
-                            if let Some(prev) = app.at_first_hunk_boundary().then(|| app.prev_file_in_tree()).flatten() {
-                                app.select_file(prev);
-                                app.sync_tree_cursor_to_file();
-                                load_current_file(app, git);
-                                if let Some(ref diff) = app.current_rich_diff {
-                                    if !diff.hunks.is_empty() {
-                                        app.selected_hunk = diff.hunks.len() - 1;
-                                        app.scroll_to_selected_hunk();
-                                    }
-                                }
-                            } else {
-                                app.prev_hunk();
-                            }
-                        }
-                    }
-                    KeyCode::Char(']') => {
-                        if app.focused_panel == Panel::DiffView {
-                            if let Some(next) = app.at_last_hunk_boundary().then(|| app.next_file_in_tree()).flatten() {
-                                app.select_file(next);
-                                app.sync_tree_cursor_to_file();
-                                load_current_file(app, git);
-                                // selected_hunk is already 0 from load_current_file
-                            } else {
-                                app.next_hunk();
-                            }
-                        }
-                    }
-                    KeyCode::Char('w') => {
-                        if app.focused_panel == Panel::DiffView {
-                            app.cycle_whitespace_mode();
+                    KeyCode::Char('[') if app.focused_panel == Panel::DiffView => {
+                        if let Some(prev) = app.at_first_hunk_boundary().then(|| app.prev_file_in_tree()).flatten() {
+                            app.select_file(prev);
+                            app.sync_tree_cursor_to_file();
                             load_current_file(app, git);
+                            if let Some(ref diff) = app.current_rich_diff
+                                && !diff.hunks.is_empty()
+                            {
+                                app.selected_hunk = diff.hunks.len() - 1;
+                                app.scroll_to_selected_hunk();
+                            }
+                        } else {
+                            app.prev_hunk();
                         }
                     }
-                    KeyCode::Char('c') => { if app.focused_panel == Panel::DiffView { app.start_comment(); } }
+                    KeyCode::Char(']') if app.focused_panel == Panel::DiffView => {
+                        if let Some(next) = app.at_last_hunk_boundary().then(|| app.next_file_in_tree()).flatten() {
+                            app.select_file(next);
+                            app.sync_tree_cursor_to_file();
+                            load_current_file(app, git);
+                            // selected_hunk is already 0 from load_current_file
+                        } else {
+                            app.next_hunk();
+                        }
+                    }
+                    KeyCode::Char('w') if app.focused_panel == Panel::DiffView => {
+                        app.cycle_whitespace_mode();
+                        load_current_file(app, git);
+                    }
+                    KeyCode::Char('c') if app.focused_panel == Panel::DiffView => { app.start_comment(); }
                     KeyCode::Char(' ') => match app.focused_panel {
                         Panel::FileList  => app.toggle_dir_at_cursor(),
                         Panel::DiffView  => app.toggle_hunk_fold(),
