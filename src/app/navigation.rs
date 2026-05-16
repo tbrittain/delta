@@ -62,10 +62,10 @@ impl App {
     /// No-op when the cursor is on a directory.
     fn sync_selected_file_from_cursor(&mut self) {
         let tree = self.tree_items();
-        if let Some(item) = tree.get(self.file_tree_cursor) {
-            if let Some(idx) = item.file_idx() {
-                self.selected_file = idx;
-            }
+        if let Some(item) = tree.get(self.file_tree_cursor)
+            && let Some(idx) = item.file_idx()
+        {
+            self.selected_file = idx;
         }
     }
 
@@ -137,11 +137,11 @@ impl App {
     }
 
     pub fn next_hunk(&mut self) {
-        if let Some(ref diff) = self.current_rich_diff {
-            if self.selected_hunk + 1 < diff.hunks.len() {
-                self.selected_hunk += 1;
-                self.scroll_to_selected_hunk();
-            }
+        if let Some(ref diff) = self.current_rich_diff
+            && self.selected_hunk + 1 < diff.hunks.len()
+        {
+            self.selected_hunk += 1;
+            self.scroll_to_selected_hunk();
         }
     }
 

@@ -271,7 +271,7 @@ pub(crate) mod test_helpers {
             make_rich_line(DiffLine {
                 old_lineno: Some(1),
                 new_lineno: Some(1),
-                kind: k.clone(),
+                kind: *k,
                 content: "x".to_string(),
             })
         }).collect()
