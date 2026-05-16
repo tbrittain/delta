@@ -166,20 +166,21 @@ impl App {
         (0..self.file_tree_cursor).rev().find_map(|i| tree[i].file_idx())
     }
 
-    /// True when `]` should cross to the next file: we are on the last hunk of the
-    /// current file and there is at least one more visible file in the tree.
+    /// True when `]` should cross to the next file: we are past the last hunk of the
+    /// current file (including files with no hunks) and there is at least one more
+    /// visible file in the tree.
     pub fn at_last_hunk_boundary(&self) -> bool {
         let Some(ref diff) = self.current_rich_diff else { return false };
-        !diff.hunks.is_empty()
-            && self.selected_hunk + 1 >= diff.hunks.len()
+        (diff.hunks.is_empty() || self.selected_hunk + 1 >= diff.hunks.len())
             && self.next_file_in_tree().is_some()
     }
 
-    /// True when `[` should cross to the previous file: we are on the first hunk of
-    /// the current file and there is at least one earlier visible file in the tree.
+    /// True when `[` should cross to the previous file: we are at or before the first
+    /// hunk of the current file (including files with no hunks) and there is at least
+    /// one earlier visible file in the tree.
     pub fn at_first_hunk_boundary(&self) -> bool {
         let Some(ref diff) = self.current_rich_diff else { return false };
-        !diff.hunks.is_empty() && self.selected_hunk == 0 && self.prev_file_in_tree().is_some()
+        (diff.hunks.is_empty() || self.selected_hunk == 0) && self.prev_file_in_tree().is_some()
     }
 
     /// Scroll the diff view so the selected hunk is at the top.
@@ -506,6 +507,17 @@ mod tests {
     }
 
     #[test]
+    fn test_at_last_hunk_boundary_true_when_no_hunks_and_more_files() {
+        let files = make_files(2);
+        let mut app = app_at_file(0);
+        app.current_rich_diff = Some(RichDiffFile {
+            file: files[0].clone(),
+            hunks: vec![],
+        });
+        assert!(app.at_last_hunk_boundary(), "empty-hunk file should allow crossing to next");
+    }
+
+    #[test]
     fn test_at_first_hunk_boundary_true_when_first_hunk_and_not_first_file() {
         let files = make_files(2);
         let mut app = app_at_file(1);
@@ -543,6 +555,17 @@ mod tests {
     fn test_at_first_hunk_boundary_false_without_diff() {
         let app = app_at_file(1);
         assert!(!app.at_first_hunk_boundary());
+    }
+
+    #[test]
+    fn test_at_first_hunk_boundary_true_when_no_hunks_and_not_first_file() {
+        let files = make_files(2);
+        let mut app = app_at_file(1);
+        app.current_rich_diff = Some(RichDiffFile {
+            file: files[1].clone(),
+            hunks: vec![],
+        });
+        assert!(app.at_first_hunk_boundary(), "empty-hunk file should allow crossing to previous");
     }
 
     #[test]

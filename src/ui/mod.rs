@@ -139,7 +139,8 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Down => match app.focused_panel {
                         Panel::FileList  => app.file_list_down(),
                         Panel::DiffView  => {
-                            let vp = terminal.size().map(|r| r.height.saturating_sub(3) as usize).unwrap_or(20);
+                            let notes_h: u16 = if app.notes.is_empty() { 0 } else { 10 };
+                            let vp = terminal.size().map(|r| r.height.saturating_sub(3 + notes_h) as usize).unwrap_or(20);
                             app.diff_scroll_down(vp);
                         }
                         Panel::NotesView => { app.notes_down(); app.scroll_notes_to_selected(8); }
