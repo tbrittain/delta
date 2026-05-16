@@ -2,6 +2,7 @@ mod cursor;
 mod diff_render;
 mod popup;
 mod render;
+pub(crate) mod split_render;
 
 use std::io;
 
@@ -192,6 +193,9 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('w') if app.focused_panel == Panel::DiffView => {
                         app.cycle_whitespace_mode();
                         load_current_file(app, git);
+                    }
+                    KeyCode::Char('s') if app.focused_panel == Panel::DiffView => {
+                        app.toggle_view_mode();
                     }
                     KeyCode::Char('c') if app.focused_panel == Panel::DiffView => { app.start_comment(); }
                     KeyCode::Char(' ') => match app.focused_panel {

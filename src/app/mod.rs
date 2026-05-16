@@ -6,7 +6,14 @@ use crate::filetree::{TreeItem, build_tree};
 use crate::git::WhitespaceMode;
 use crate::segment::RichDiffFile;
 
-mod layout;
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum ViewMode {
+    #[default]
+    Inline,
+    SideBySide,
+}
+
+pub(crate) mod layout;
 mod navigation;
 mod notes;
 
@@ -90,6 +97,8 @@ pub struct App {
     pub file_list_h_scroll: usize,
     /// Active whitespace-sensitivity mode for `git diff`. Cycled with `w` in the diff view.
     pub whitespace_mode: WhitespaceMode,
+    /// Whether the diff panel shows inline (unified) or side-by-side layout. Toggled with `s`.
+    pub view_mode: ViewMode,
 }
 
 impl App {
@@ -117,6 +126,7 @@ impl App {
             file_tree_cursor: 0,
             file_list_h_scroll: 0,
             whitespace_mode: WhitespaceMode::None,
+            view_mode: ViewMode::Inline,
         }
     }
 

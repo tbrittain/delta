@@ -23,6 +23,38 @@ pub(crate) fn visual_rows_for_diff_line(content: &str, panel_width: usize) -> us
     total.div_ceil(panel_width)
 }
 
+/// Split the available inner panel width into `(left_col, right_col)`,
+/// reserving 1 column for the `│` divider between the two halves.
+pub(crate) fn split_column_widths(available: usize) -> (usize, usize) {
+    let left  = available.saturating_sub(1) / 2;
+    let right = available.saturating_sub(1) - left;
+    (left, right)
+}
+
+/// Gutter width for one column in split view: 4-digit line number + 1 space.
+pub(crate) const SPLIT_GUTTER: usize = 5;
+
+/// Visual rows a content string occupies in one split column of `col_width`.
+/// Returns 1 when `col_width` is too narrow to hold any content (guards against divide-by-zero).
+pub(crate) fn visual_rows_for_split_content(content: &str, col_width: usize) -> usize {
+    let area = col_width.saturating_sub(SPLIT_GUTTER);
+    if area == 0 { return 1; }
+    content.chars().count().div_ceil(area).max(1)
+}
+
+/// Visual height of a paired side-by-side row: `max(left_rows, right_rows)`.
+/// An absent side contributes 1 row (blank line).
+pub(crate) fn split_pair_height(
+    left:  Option<&str>,
+    right: Option<&str>,
+    left_col: usize,
+    right_col: usize,
+) -> usize {
+    let lh = left .map(|s| visual_rows_for_split_content(s, left_col) ).unwrap_or(1);
+    let rh = right.map(|s| visual_rows_for_split_content(s, right_col)).unwrap_or(1);
+    lh.max(rh)
+}
+
 /// Count the visual lines a slice of rich lines occupies when context runs are folded.
 /// Runs of context lines >= FOLD_THRESHOLD collapse to a single placeholder line.
 /// `panel_width` is passed to `visual_rows_for_diff_line` for non-context (changed) lines;
@@ -245,6 +277,95 @@ mod tests {
     fn test_hunk_has_foldable_context_true_at_threshold() {
         let lines = make_rich_lines(&[LineKind::Context; FOLD_THRESHOLD]);
         assert!(hunk_has_foldable_context(&lines));
+    }
+
+    // ── split_column_widths ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_split_column_widths_even_available() {
+        assert_eq!(split_column_widths(81), (40, 40));
+    }
+
+    #[test]
+    fn test_split_column_widths_odd_available() {
+        // 80 - 1 divider = 79; left = 39, right = 40
+        assert_eq!(split_column_widths(80), (39, 40));
+    }
+
+    #[test]
+    fn test_split_column_widths_zero_available() {
+        assert_eq!(split_column_widths(0), (0, 0));
+    }
+
+    #[test]
+    fn test_split_column_widths_one_available() {
+        // 1 - 1 = 0; both zero
+        assert_eq!(split_column_widths(1), (0, 0));
+    }
+
+    // ── visual_rows_for_split_content ─────────────────────────────────────────
+
+    #[test]
+    fn test_split_content_short_line_fits_in_one_row() {
+        // col_width=20, area=15, content=10 chars → 1 row
+        assert_eq!(visual_rows_for_split_content("0123456789", 20), 1);
+    }
+
+    #[test]
+    fn test_split_content_exactly_fills_area() {
+        // col_width=20, area=15; 15 chars → 1 row
+        let s = "x".repeat(15);
+        assert_eq!(visual_rows_for_split_content(&s, 20), 1);
+    }
+
+    #[test]
+    fn test_split_content_one_char_over_wraps() {
+        let s = "x".repeat(16);
+        assert_eq!(visual_rows_for_split_content(&s, 20), 2);
+    }
+
+    #[test]
+    fn test_split_content_zero_col_width_returns_one() {
+        assert_eq!(visual_rows_for_split_content("hello", 0), 1);
+    }
+
+    #[test]
+    fn test_split_content_empty_string_returns_one() {
+        assert_eq!(visual_rows_for_split_content("", 20), 1);
+    }
+
+    // ── split_pair_height ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_split_pair_height_both_fit_one_row() {
+        assert_eq!(split_pair_height(Some("short"), Some("short"), 20, 20), 1);
+    }
+
+    #[test]
+    fn test_split_pair_height_left_taller() {
+        let long = "x".repeat(16);
+        assert_eq!(split_pair_height(Some(&long), Some("short"), 20, 20), 2);
+    }
+
+    #[test]
+    fn test_split_pair_height_right_taller() {
+        let long = "x".repeat(16);
+        assert_eq!(split_pair_height(Some("short"), Some(&long), 20, 20), 2);
+    }
+
+    #[test]
+    fn test_split_pair_height_absent_left_counts_as_one() {
+        assert_eq!(split_pair_height(None, Some("short"), 20, 20), 1);
+    }
+
+    #[test]
+    fn test_split_pair_height_absent_right_counts_as_one() {
+        assert_eq!(split_pair_height(Some("short"), None, 20, 20), 1);
+    }
+
+    #[test]
+    fn test_split_pair_height_both_absent_returns_one() {
+        assert_eq!(split_pair_height(None::<&str>, None::<&str>, 20, 20), 1);
     }
 
     // ── visual_rows_for_diff_line ─────────────────────────────────────────────

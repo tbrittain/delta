@@ -1,5 +1,6 @@
 use crate::filetree::TreeItem;
-use super::{App, FILE_LIST_INNER_WIDTH};
+use crate::ui::split_render::{split_diff_content_lines, split_hunk_scroll_offset};
+use super::{App, FILE_LIST_INNER_WIDTH, ViewMode};
 use super::layout::{context_run_visual_lines, hunk_has_foldable_context, visual_rows_for_diff_line};
 
 impl App {
@@ -125,6 +126,15 @@ impl App {
         self.whitespace_mode = self.whitespace_mode.next();
     }
 
+    /// Toggle between inline and side-by-side diff view. Resets scroll to the top.
+    pub fn toggle_view_mode(&mut self) {
+        self.view_mode = match self.view_mode {
+            crate::app::ViewMode::Inline     => crate::app::ViewMode::SideBySide,
+            crate::app::ViewMode::SideBySide => crate::app::ViewMode::Inline,
+        };
+        self.diff_scroll = 0;
+    }
+
     pub fn diff_scroll_up(&mut self) {
         self.diff_scroll = self.diff_scroll.saturating_sub(3);
     }
@@ -191,6 +201,13 @@ impl App {
     /// Compute the rendered line offset of `target_hunk` within the diff view.
     /// Accounts for folded context runs so hunk-jump scrolls to the right position.
     fn hunk_scroll_offset(&self, target_hunk: usize) -> usize {
+        match self.view_mode {
+            ViewMode::Inline     => self.hunk_scroll_offset_inline(target_hunk),
+            ViewMode::SideBySide => split_hunk_scroll_offset(self, target_hunk),
+        }
+    }
+
+    fn hunk_scroll_offset_inline(&self, target_hunk: usize) -> usize {
         let Some(ref diff) = self.current_rich_diff else { return 0 };
         let pw = self.diff_view_content_width;
         let mut offset = 0;
@@ -214,6 +231,13 @@ impl App {
     /// Total rendered line count for the current diff, used to cap scroll and drive the scrollbar.
     /// Accounts for folded context runs and per-line visual row counts when wrap is on.
     pub(crate) fn diff_content_lines(&self) -> usize {
+        match self.view_mode {
+            ViewMode::Inline     => self.diff_content_lines_inline(),
+            ViewMode::SideBySide => split_diff_content_lines(self),
+        }
+    }
+
+    fn diff_content_lines_inline(&self) -> usize {
         let Some(ref diff) = self.current_rich_diff else { return 0 };
         let pw = self.diff_view_content_width;
         diff.hunks.iter().enumerate().map(|(i, h)| {
@@ -255,6 +279,26 @@ mod tests {
     use crate::git::WhitespaceMode;
     use crate::segment::RichDiffFile;
     use std::path::PathBuf;
+
+    // ── ViewMode toggle ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_toggle_view_mode_cycles() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        assert_eq!(app.view_mode, crate::app::ViewMode::Inline);
+        app.toggle_view_mode();
+        assert_eq!(app.view_mode, crate::app::ViewMode::SideBySide);
+        app.toggle_view_mode();
+        assert_eq!(app.view_mode, crate::app::ViewMode::Inline);
+    }
+
+    #[test]
+    fn test_toggle_view_mode_resets_scroll() {
+        let mut app = app_with_diff(1);
+        app.diff_scroll = 42;
+        app.toggle_view_mode();
+        assert_eq!(app.diff_scroll, 0);
+    }
 
     // ── Whitespace mode ───────────────────────────────────────────────────────
 
