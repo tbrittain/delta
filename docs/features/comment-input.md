@@ -29,7 +29,7 @@ Typing any character while text is selected replaces the selection (standard edi
 
 `Ctrl+C` is captured in raw terminal mode (crossterm disables signal processing), so it does not send SIGINT — it copies.
 
-Once submitted, notes display inline in the diff with a `◎` marker (soft blue, italic). Long note lines are truncated with `…` at the diff panel edge. Multi-line notes render with `◎` on the first line and indented continuation lines. Line-level notes anchor the `◎` marker immediately after the last selected line; whole-hunk notes appear at the end of the hunk.
+Once submitted, notes display inline in the diff with a `◎` marker (soft blue, italic). Long note lines are truncated with `…` at the diff panel edge. Multi-line notes render with `◎` on the first line and indented continuation lines. Line-level notes anchor the `◎` marker immediately after the last selected line in both inline and split view; whole-hunk notes appear at the end of the hunk.
 
 ### Line-level (sub-hunk) commenting
 
@@ -39,7 +39,8 @@ Press `v` on any hunk to enter **line-select mode**. A blue selection highlight 
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` | Move the selection cursor (anchor stays at line 0) |
+| `↑` / `↓` | Move the cursor (repositions anchor and active together) |
+| `Shift+↑` / `Shift+↓` | Extend the selection (anchor stays, active moves) |
 | `c` | Open the comment popup for the selected line range |
 | `d` | Delete the note on the selected range (if one exists) |
 | `Esc` | Return to normal mode |

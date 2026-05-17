@@ -321,6 +321,19 @@ fn push_split_hunk(
     };
 
     let divider = Span::styled("│", Style::default().fg(Color::DarkGray));
+    let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
+
+    let push_note = |note_text: &str, out: &mut Vec<Line<'static>>| {
+        for (i, line_text) in note_text.lines().enumerate() {
+            let prefix = if i == 0 { "  ◎ " } else { "    " };
+            let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
+                format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
+            } else {
+                line_text.to_string()
+            };
+            out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
+        }
+    };
 
     for row in rows {
         match row {
@@ -333,7 +346,6 @@ fn push_split_hunk(
                 let selected = is_selected(left) || is_selected(right);
                 let left_content  = left .map(|rl| &rl.diff_line.content as &str);
                 let right_content = right.map(|rl| &rl.diff_line.content as &str);
-                // Use raw content for row count (render_safe is applied per-span).
                 let height = split_pair_height(left_content, right_content, left_col, right_col);
 
                 for v in 0..height {
@@ -342,22 +354,28 @@ fn push_split_hunk(
                     spans.extend(render_column_row(right, v, right_col, selected));
                     out.push(Line::from(spans));
                 }
+
+                // Inject line-level notes whose range ends on this row's new_lineno.
+                // Use new_lineno from the right (new-file) side; fall back to left.
+                let lineno = right.and_then(|r| r.diff_line.new_lineno)
+                    .or_else(|| left.and_then(|l| l.diff_line.old_lineno));
+                if let Some(n) = lineno {
+                    for note in app.notes.iter() {
+                        if note.file == file_path && note.hunk_header == hunk.header
+                            && note.line_range.as_ref().map(|r| r.end == n).unwrap_or(false)
+                        {
+                            push_note(&note.note, out);
+                        }
+                    }
+                }
             }
         }
     }
 
-    // Notes at hunk footer. Whole-hunk notes appear first, then line-range notes.
-    let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
+    // Footer: whole-hunk notes only.
     for note in &app.notes {
-        if note.file != file_path || note.hunk_header != hunk.header { continue; }
-        for (i, line_text) in note.note.lines().enumerate() {
-            let prefix = if i == 0 { "  ◎ " } else { "    " };
-            let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
-                format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
-            } else {
-                line_text.to_string()
-            };
-            out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
+        if note.file == file_path && note.hunk_header == hunk.header && note.line_range.is_none() {
+            push_note(&note.note, out);
         }
     }
     out.push(Line::raw(""));
@@ -643,6 +661,17 @@ mod tests {
         let full = text_str(&build_split_diff_text(&app, 1000));
         assert!(full.contains("lines of context"), "long context run must be folded");
         assert!(!full.contains("ctx0"), "folded context lines must not be individually shown");
+    }
+
+    #[test]
+    fn test_split_submitted_note_shown() {
+        use crate::app::Mode;
+        let mut app = app_with_split_diff(1);
+        app.mode = Mode::Comment { hunk_idx: 0, input: "my split note".to_string(), cursor: 0, original: None, line_range: None };
+        app.submit_comment();
+        let full = text_str(&build_split_diff_text(&app, 1000));
+        assert!(full.contains("my split note"), "note text should appear in split view");
+        assert!(full.contains("◎"), "note marker should appear in split view");
     }
 
     #[test]
