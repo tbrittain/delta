@@ -58,6 +58,22 @@ Press `Space` to expand a folded region; press `Space` again to fold it back. Th
 
 Long lines wrap at the panel boundary (`Wrap { trim: false }`). The gutter (line number + prefix) appears on the first visual row; continuation rows start at the left edge with no indent. There is no horizontal scrolling. The scroll accounting tracks visual rows (after wrapping) so hunk navigation and scroll-cap remain accurate regardless of line length.
 
+### Side-by-side diff view
+
+Press `s` in the diff view to toggle between inline (unified) and side-by-side layout. Inline is the default; `s` switches to split, and `s` again returns to inline.
+
+In split view the diff panel is divided into two half-width columns separated by a `│` divider:
+
+- **Left column** — old file content: removed lines and context lines
+- **Right column** — new file content: added lines and context lines
+- Each column has its own line-number gutter (4 digits + 1 space)
+- Removed/added line runs are paired 1:1 by position; when one side has more lines than the other, the shorter side shows blank rows for the unpaired lines
+- Intraline character-level highlighting is preserved on both sides
+- Context folding works the same as in inline mode
+- Hunk navigation (`[`/`]`) and scroll accounting correctly account for the taller side of each pair
+
+The `[split]` label appears in the diff panel title while the split view is active.
+
 ---
 
 ## Planned improvements
@@ -95,17 +111,6 @@ When an entire file is new (e.g. a freshly committed README), git produces a sin
 
 ---
 
-### No side-by-side diff view
-
-The diff is inline (unified diff style). Some reviewers find side-by-side easier for reading modifications where old and new should be compared directly.
-
-**Possible directions:**
-- Toggle with `s` to switch between inline and split view
-- Split view would divide the diff panel: old content left, new content right
-
-**Priority:** Post-MVP. Non-trivial — requires significant layout and rendering changes.
-
----
 
 ### No line-wrap toggle
 

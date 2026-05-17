@@ -6,12 +6,13 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Mode, Panel};
+use crate::app::{App, Mode, Panel, ViewMode};
 use crate::diff::FileStatus;
 use crate::filetree::TreeItem;
 use crate::git::WhitespaceMode;
 use super::{ACCENT, MUTED};
 use super::diff_render::build_diff_text;
+use super::split_render::build_split_diff_text;
 use super::popup::render_comment_popup;
 
 pub(super) fn render(frame: &mut Frame, app: &App) {
@@ -115,13 +116,20 @@ pub(super) fn render_diff_view(frame: &mut Frame, app: &App, area: Rect) {
         .or_else(|| app.files.get(app.selected_file).map(|f| f.path.display().to_string()))
         .unwrap_or_else(|| "Diff".to_string());
     let ws_label = app.whitespace_mode.label();
+    let split_label = match app.view_mode {
+        ViewMode::Inline     => "",
+        ViewMode::SideBySide => " [split]",
+    };
     let title = match &app.current_rich_diff {
         Some(diff) if !diff.hunks.is_empty() =>
-            format!(" {} — {}/{}{} ", file_name, app.selected_hunk + 1, diff.hunks.len(), ws_label),
-        _ => format!(" {}{} ", file_name, ws_label),
+            format!(" {} — {}/{}{}{} ", file_name, app.selected_hunk + 1, diff.hunks.len(), ws_label, split_label),
+        _ => format!(" {}{}{} ", file_name, ws_label, split_label),
     };
     let note_max_chars = area.width.saturating_sub(6) as usize;
-    let text = build_diff_text(app, note_max_chars);
+    let text = match app.view_mode {
+        ViewMode::Inline     => build_diff_text(app, note_max_chars),
+        ViewMode::SideBySide => build_split_diff_text(app, note_max_chars),
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
@@ -236,8 +244,8 @@ pub(super) fn status_bar_text(app: &App) -> String {
             Panel::NotesView => " Tab/Shift+Tab: navigate  ↑↓: notes  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string(),
             Panel::DiffView  => {
                 let note_count = app.notes.len();
-                let notes_str = if note_count == 1 { "  ●1 note".to_string() }
-                    else if note_count > 1 { format!("  ●{} notes", note_count) }
+                let notes_str = if note_count == 1 { "  ● 1 note".to_string() }
+                    else if note_count > 1 { format!("  ● {} notes", note_count) }
                     else { String::new() };
                 let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete" } else { "  c: comment" };
                 let fold_hint = if app.selected_hunk_is_foldable() {
@@ -248,7 +256,11 @@ pub(super) fn status_bar_text(app: &App) -> String {
                     WhitespaceMode::IgnoreChanges => "  w: whitespace(-b)".to_string(),
                     WhitespaceMode::IgnoreAll     => "  w: whitespace(-w)".to_string(),
                 };
-                format!(" Tab/Shift+Tab: navigate  ↑↓: scroll  []: hunk{}{}{}  q: quit{}", note_actions, fold_hint, ws_hint, notes_str)
+                let split_hint = match app.view_mode {
+                    ViewMode::Inline     => "  s: split",
+                    ViewMode::SideBySide => "  s: inline",
+                };
+                format!(" Tab/Shift+Tab: navigate  ↑↓: scroll  []: hunk{}{}{}{}  q: quit{}", note_actions, fold_hint, ws_hint, split_hint, notes_str)
             }
         },
     }
@@ -557,7 +569,7 @@ mod tests {
         let mut app = app_diff_view();
         app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
         app.submit_comment();
-        assert!(status_bar_text(&app).contains("●1 note"));
+        assert!(status_bar_text(&app).contains("● 1 note"));
     }
 
     #[test]
@@ -570,7 +582,7 @@ mod tests {
             app.selected_hunk = hunk_idx;
         }
         app.selected_hunk = 0;
-        assert!(status_bar_text(&app).contains("●2 notes"));
+        assert!(status_bar_text(&app).contains("● 2 notes"));
     }
 
     #[test]
