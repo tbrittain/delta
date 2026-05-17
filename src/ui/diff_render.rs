@@ -187,6 +187,17 @@ mod tests {
     }
 
     #[test]
+    fn test_selecting_second_hunk_moves_marker() {
+        let mut app = app_with_diff(2);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.selected_hunk = 1;
+        let content = text_str(&build_diff_text(&app, 1000));
+        assert_eq!(content.matches("▶").count(), 1);
+        let pos = content.find("▶").unwrap();
+        assert!(content[pos + "▶ ".len()..].starts_with("@@ -11,"));
+    }
+
+    #[test]
     fn test_non_selected_hunk_indent() {
         let mut app = app_with_diff(2);
         app.focused_panel = crate::app::Panel::DiffView;

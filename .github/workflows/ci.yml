@@ -33,6 +33,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
 
+  coverage:
+    name: Coverage (diff)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --lcov --output-path lcov.info
+      - run: pip install diff-cover
+      - run: diff-cover lcov.info --compare-branch=origin/main --fail-under=80
+
   build:
     name: Build release (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

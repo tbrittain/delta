@@ -276,10 +276,6 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::SEL_BG;
-    use super::super::cursor::line_spans;
-    use super::super::diff_render::build_diff_text;
-    use super::super::popup::render_comment_popup;
     use crate::app::{App, FeedbackNote, Mode, Panel};
     use crate::app::test_helpers::{make_rich_hunk, make_rich_line};
     use crate::diff::{ChangedFile, DiffLine, FileStatus, LineKind};
@@ -299,20 +295,6 @@ mod tests {
             )).collect(),
         });
         app
-    }
-
-    fn text_to_string(text: &ratatui::text::Text<'static>) -> String {
-        text.lines.iter()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
-            .collect::<Vec<_>>().join("\n")
-    }
-
-    fn spans_text(spans: &[ratatui::text::Span<'static>]) -> String {
-        spans.iter().map(|s| s.content.as_ref()).collect()
-    }
-
-    fn has_sel_bg(span: &ratatui::text::Span<'static>) -> bool {
-        span.style.bg == Some(SEL_BG)
     }
 
     fn diff_view_rendered(app: &App, width: u16, height: u16) -> String {
@@ -357,13 +339,6 @@ mod tests {
         assert_eq!(q_count, 20, "short diff line should render all 20 chars");
     }
 
-    fn popup_rendered(app: &App) -> String {
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| render_comment_popup(f, app, f.area())).unwrap();
-        terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect()
-    }
-
     fn notes_panel_rendered(app: &App) -> String {
         let backend = TestBackend::new(80, 20);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -384,98 +359,6 @@ mod tests {
         let mut a = make_app_with_hunks(1);
         a.focused_panel = Panel::DiffView;
         a
-    }
-
-    // ── line_spans (imported from cursor) ─────────────────────────────────────
-
-    #[test]
-    fn test_line_spans_no_selection() {
-        let spans = line_spans("hello", 0, None);
-        assert_eq!(spans_text(&spans), "hello");
-        assert!(spans.iter().all(|s| !has_sel_bg(s)));
-    }
-
-    #[test]
-    fn test_line_spans_selection_middle() {
-        let spans = line_spans("hello", 0, Some((1, 4)));
-        assert!(has_sel_bg(spans.iter().find(|s| s.content.as_ref() == "ell").unwrap()));
-    }
-
-    // ── build_diff_text ───────────────────────────────────────────────────────
-
-    #[test]
-    fn test_selected_hunk_has_marker() {
-        assert!(text_to_string(&build_diff_text(&make_app_with_hunks(2), 1000)).contains("▶ "));
-    }
-
-    #[test]
-    fn test_selecting_second_hunk_moves_marker() {
-        let mut app = make_app_with_hunks(2);
-        app.selected_hunk = 1;
-        let content = text_to_string(&build_diff_text(&app, 1000));
-        assert_eq!(content.matches("▶").count(), 1);
-        let pos = content.find("▶").unwrap();
-        assert!(content[pos + "▶ ".len()..].starts_with("@@ -11,"));
-    }
-
-    #[test]
-    fn test_no_diff_shows_loading() {
-        let files = vec![ChangedFile { path: PathBuf::from("src/main.rs"), status: FileStatus::Modified, old_path: None }];
-        let app = App::new(files, "main".to_string(), "HEAD".to_string());
-        assert!(text_to_string(&build_diff_text(&app, 1000)).contains("Loading"));
-    }
-
-    #[test]
-    fn test_submitted_note_shown_inline() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "my note".to_string(), cursor: 0, original: None };
-        app.submit_comment();
-        assert!(text_to_string(&build_diff_text(&app, 1000)).contains("my note"));
-    }
-
-    #[test]
-    fn test_inline_note_truncated() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a".repeat(60), cursor: 0, original: None };
-        app.submit_comment();
-        let c = text_to_string(&build_diff_text(&app, 20));
-        assert!(c.contains("…") && !c.contains(&"a".repeat(21)));
-    }
-
-    // ── Comment popup ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_popup_renders_input() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "review text".to_string(), cursor: 0, original: None };
-        assert!(popup_rendered(&app).contains("review text"));
-    }
-
-    #[test]
-    fn test_popup_no_block_cursor() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "hello".to_string(), cursor: 3, original: None };
-        assert!(!popup_rendered(&app).contains("█"));
-    }
-
-    #[test]
-    fn test_popup_not_in_normal_mode() {
-        assert!(!popup_rendered(&make_app_with_hunks(1)).contains("Comment"));
-    }
-
-    #[test]
-    fn test_popup_help_line() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
-        let s = popup_rendered(&app);
-        assert!(s.contains("Ctrl+S") && s.contains("Esc"));
-    }
-
-    #[test]
-    fn test_popup_title_has_hunk_header() {
-        let mut app = make_app_with_hunks(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
-        assert!(popup_rendered(&app).contains("@@"));
     }
 
     // ── Whitespace mode in diff title ─────────────────────────────────────────
