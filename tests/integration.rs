@@ -390,6 +390,50 @@ fn test_pipeline_comment_and_json_export() {
     assert_eq!(note["note"], "needs a test");
 }
 
+// ── Line-level comment pipeline ───────────────────────────────────────────────
+
+#[test]
+fn test_pipeline_line_level_comment_and_json_export() {
+    use delta::app::Mode;
+
+    let repo = FixtureRepo::new();
+    let git = SystemGit::with_dir(&repo.path);
+    let files = git.changed_files(FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
+
+    let mut app = App::new(files, FixtureRepo::FROM_REF.to_string(), FixtureRepo::TO_REF.to_string());
+
+    let main_idx = app.files.iter().position(|f| f.path.ends_with("main.rs")).unwrap();
+    app.select_file(main_idx);
+    let path = app.files[app.selected_file].path.to_string_lossy().to_string();
+    let file = app.files[app.selected_file].clone();
+    let raw = git.file_diff(FixtureRepo::FROM_REF, FixtureRepo::TO_REF, &path, WhitespaceMode::None).unwrap();
+    app.current_rich_diff = Some(SyntaxHighlighter::new().enrich(&parse_diff(&raw, file)));
+
+    // Enter line-select and select just the first line of hunk 0.
+    app.enter_line_select();
+    app.start_comment_for_selection();
+    if let Mode::Comment { ref mut input, .. } = app.mode {
+        input.push_str("targeted line note");
+    }
+    app.submit_comment();
+
+    assert_eq!(app.notes.len(), 1);
+    assert!(app.notes[0].line_range.is_some(), "note should have a line range");
+
+    // JSON export should include the lines field.
+    let json = export::to_json(&app.notes, FixtureRepo::FROM_REF, FixtureRepo::TO_REF).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let note = &parsed["notes"][0];
+    assert_eq!(note["note"], "targeted line note");
+    assert!(!note["lines"].is_null(), "JSON should have lines field for line-range note");
+    assert!(note["lines"]["start"].is_number());
+    assert!(note["lines"]["end"].is_number());
+
+    // Markdown export should include the line range label.
+    let md = export::to_markdown(&app.notes, FixtureRepo::FROM_REF, FixtureRepo::TO_REF);
+    assert!(md.contains("· L"), "markdown heading should include line range label");
+}
+
 // ── Whitespace-sensitivity flags ──────────────────────────────────────────────
 
 /// Builds a minimal two-commit repo where `file.rs` changes only in whitespace

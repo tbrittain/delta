@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn test_hunk_scroll_offset_accounts_for_notes() {
         let mut app = app_with_diff(2);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         // hunk 0: 1 header + 3 lines + 1 note + 1 blank = 6
         assert_eq!(app.hunk_scroll_offset(1), 6);
@@ -848,6 +848,7 @@ mod tests {
             hunk_header: "@@".to_string(),
             hunk_content: String::new(),
             note: "note".to_string(),
+            line_range: None,
         });
         let tree = app.tree_items();
         if let crate::filetree::TreeItem::Dir { has_notes, .. } = &tree[0] {

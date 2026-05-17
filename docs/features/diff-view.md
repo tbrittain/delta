@@ -103,11 +103,10 @@ When an entire file is new (e.g. a freshly committed README), git produces a sin
 
 **Context:** First observed reviewing the README commit.
 
-**Possible directions:**
-- Virtual hunk splitting: break hunks above a threshold line count into navigable sub-hunks
-- Sub-hunk selection: let the user mark a range of lines within a hunk before pressing `c`
+**Status:** Partially addressed — line-level comments (`v` in the diff view) allow the reviewer to select and annotate any sub-range of a large hunk without needing to split it. Virtual hunk splitting would still improve keyboard navigation for very large hunks (hundreds of lines), but the inability to comment on specific lines is resolved.
 
-**Priority:** Would significantly improve the experience for large new files. Requires meaningful changes to the IR and app state.
+**Remaining direction:**
+- Virtual hunk splitting: break hunks above a threshold line count into navigable sub-hunks for `[`/`]` navigation.
 
 ---
 

@@ -1,8 +1,23 @@
 use std::path::PathBuf;
 
 use crate::diff::LineKind;
-use super::{App, FeedbackNote, Mode};
+use crate::segment::RichHunk;
+use super::{App, FeedbackNote, LineRange, Mode};
 use super::layout::note_visual_rows;
+
+/// Given a hunk and two line indices (anchor and active), compute the file-line
+/// range using `new_lineno` with fallback to `old_lineno` for removed-only lines.
+pub(crate) fn line_indices_to_range(hunk: &RichHunk, idx_a: usize, idx_b: usize) -> Option<LineRange> {
+    let lo = idx_a.min(idx_b);
+    let hi = idx_a.max(idx_b);
+    let lineno_for = |idx: usize| -> Option<u32> {
+        let rl = hunk.lines.get(idx)?;
+        rl.diff_line.new_lineno.or(rl.diff_line.old_lineno)
+    };
+    let start = lineno_for(lo)?;
+    let end   = lineno_for(hi)?;
+    Some(LineRange::new(start, end))
+}
 
 impl App {
     // ── Notes panel ──────────────────────────────────────────────────────────
@@ -72,14 +87,14 @@ impl App {
 
     pub fn current_hunk_has_note(&self) -> bool {
         match self.current_hunk_identity() {
-            Some((file, header)) => self.notes.iter().any(|n| n.file == file && n.hunk_header == header),
+            Some((file, header)) => self.notes.iter().any(|n| n.file == file && n.hunk_header == header && n.line_range.is_none()),
             None => false,
         }
     }
 
     pub fn delete_note_for_current_hunk(&mut self) {
         let Some((file, header)) = self.current_hunk_identity() else { return };
-        self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+        self.notes.retain(|n| !(n.file == file && n.hunk_header == header && n.line_range.is_none()));
         self.expanded_notes.clear();
         self.notes_scroll = 0;
         if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
@@ -87,15 +102,15 @@ impl App {
         }
     }
 
-    /// Remove the existing note for the current hunk and re-open the comment
-    /// input pre-populated with the old text so the user can revise it.
+    /// Remove the existing whole-hunk note and re-open the comment input
+    /// pre-populated with the old text so the user can revise it.
     pub fn edit_note_for_current_hunk(&mut self) {
         let Some((file, header)) = self.current_hunk_identity() else { return };
         if let Some(original) = self.notes.iter()
-            .find(|n| n.file == file && n.hunk_header == header)
+            .find(|n| n.file == file && n.hunk_header == header && n.line_range.is_none())
             .cloned()
         {
-            self.notes.retain(|n| !(n.file == file && n.hunk_header == header));
+            self.notes.retain(|n| !(n.file == file && n.hunk_header == header && n.line_range.is_none()));
             self.expanded_notes.clear();
             if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
                 self.selected_note = self.notes.len() - 1;
@@ -109,6 +124,7 @@ impl App {
                 input,
                 cursor,
                 original: Some(original),
+                line_range: None,
             };
         }
     }
@@ -127,13 +143,14 @@ impl App {
                     input: String::new(),
                     cursor: 0,
                     original: None,
+                    line_range: None,
                 };
             }
         }
     }
 
     pub fn submit_comment(&mut self) {
-        if let Mode::Comment { hunk_idx, ref input, .. } = self.mode.clone() {
+        if let Mode::Comment { hunk_idx, ref input, ref line_range, .. } = self.mode.clone() {
             let trimmed = input.trim().to_string();
             if !trimmed.is_empty()
                 && let Some(ref diff) = self.current_rich_diff
@@ -142,6 +159,13 @@ impl App {
                 let hunk_content = hunk
                     .lines
                     .iter()
+                    .filter(|rl| match line_range {
+                        Some(r) => {
+                            let lineno = rl.diff_line.new_lineno.or(rl.diff_line.old_lineno);
+                            lineno.map(|n| r.contains(n)).unwrap_or(false)
+                        }
+                        None => true,
+                    })
                     .map(|rl| {
                         let prefix = match rl.diff_line.kind {
                             LineKind::Added   => "+",
@@ -158,6 +182,7 @@ impl App {
                     hunk_header: hunk.header.clone(),
                     hunk_content,
                     note: trimmed,
+                    line_range: line_range.clone(),
                 });
             }
         }
@@ -176,6 +201,107 @@ impl App {
         self.comment_scroll = 0;
         self.comment_anchor = None;
         self.mode = Mode::Normal;
+    }
+
+    // ── Line-select mode ─────────────────────────────────────────────────────
+
+    pub fn enter_line_select(&mut self) {
+        let has_lines = self.current_rich_diff.as_ref()
+            .and_then(|d| d.hunks.get(self.selected_hunk))
+            .map(|h| !h.lines.is_empty())
+            .unwrap_or(false);
+        if has_lines {
+            self.mode = Mode::LineSelect {
+                hunk_idx: self.selected_hunk,
+                anchor_line: 0,
+                active_line: 0,
+            };
+        }
+    }
+
+    pub fn line_select_up(&mut self) {
+        if let Mode::LineSelect { ref mut active_line, .. } = self.mode {
+            *active_line = active_line.saturating_sub(1);
+        }
+    }
+
+    pub fn line_select_down(&mut self) {
+        if let Mode::LineSelect { hunk_idx, ref mut active_line, .. } = self.mode {
+            let max = self.current_rich_diff.as_ref()
+                .and_then(|d| d.hunks.get(hunk_idx))
+                .map(|h| h.lines.len().saturating_sub(1))
+                .unwrap_or(0);
+            *active_line = (*active_line + 1).min(max);
+        }
+    }
+
+    pub fn selected_range_has_note(&self) -> bool {
+        let Mode::LineSelect { hunk_idx, anchor_line, active_line } = self.mode else { return false };
+        let Some(ref diff) = self.current_rich_diff else { return false };
+        let Some(hunk) = diff.hunks.get(hunk_idx) else { return false };
+        let Some(range) = line_indices_to_range(hunk, anchor_line, active_line) else { return false };
+        self.notes.iter().any(|n| {
+            n.file == diff.file.path && n.hunk_header == hunk.header && n.line_range.as_ref() == Some(&range)
+        })
+    }
+
+    pub fn start_comment_for_selection(&mut self) {
+        let Mode::LineSelect { hunk_idx, anchor_line, active_line } = self.mode else { return };
+        let Some(ref diff) = self.current_rich_diff else { return };
+        let Some(hunk) = diff.hunks.get(hunk_idx) else { return };
+        let Some(range) = line_indices_to_range(hunk, anchor_line, active_line) else { return };
+
+        let file = diff.file.path.clone();
+        let header = hunk.header.clone();
+
+        let existing = self.notes.iter()
+            .find(|n| n.file == file && n.hunk_header == header && n.line_range.as_ref() == Some(&range))
+            .cloned();
+
+        if let Some(original) = existing {
+            self.notes.retain(|n| !(n.file == file && n.hunk_header == header && n.line_range.as_ref() == Some(&range)));
+            self.expanded_notes.clear();
+            if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
+                self.selected_note = self.notes.len() - 1;
+            }
+            let cursor = original.note.len();
+            let input = original.note.clone();
+            self.comment_scroll = 0;
+            self.comment_anchor = None;
+            self.mode = Mode::Comment {
+                hunk_idx,
+                input,
+                cursor,
+                original: Some(original),
+                line_range: Some(range),
+            };
+        } else {
+            self.comment_scroll = 0;
+            self.comment_anchor = None;
+            self.mode = Mode::Comment {
+                hunk_idx,
+                input: String::new(),
+                cursor: 0,
+                original: None,
+                line_range: Some(range),
+            };
+        }
+    }
+
+    pub fn delete_note_for_selection(&mut self) {
+        let Mode::LineSelect { hunk_idx, anchor_line, active_line } = self.mode else { return };
+        let Some(ref diff) = self.current_rich_diff else { return };
+        let Some(hunk) = diff.hunks.get(hunk_idx) else { return };
+        let Some(range) = line_indices_to_range(hunk, anchor_line, active_line) else { return };
+
+        let file = diff.file.path.clone();
+        let header = hunk.header.clone();
+        self.notes.retain(|n| !(n.file == file && n.hunk_header == header && n.line_range.as_ref() == Some(&range)));
+        self.expanded_notes.clear();
+        self.notes_scroll = 0;
+        if self.selected_note >= self.notes.len() && !self.notes.is_empty() {
+            self.selected_note = self.notes.len() - 1;
+        }
     }
 }
 
@@ -267,6 +393,7 @@ mod tests {
             input: "This looks wrong".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert_eq!(app.notes.len(), 1);
@@ -282,6 +409,7 @@ mod tests {
             input: "some note".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert_eq!(app.mode, Mode::Normal);
@@ -295,6 +423,7 @@ mod tests {
             input: "   ".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert!(app.notes.is_empty());
@@ -308,6 +437,7 @@ mod tests {
             input: "check this".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         let content = &app.notes[0].hunk_content;
@@ -325,6 +455,7 @@ mod tests {
             input: "note on second hunk".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert_eq!(app.notes.len(), 1);
@@ -363,7 +494,7 @@ mod tests {
         let mut app = app_with_diff(3);
         for hunk_idx in [0, 1] {
             app.selected_hunk = hunk_idx;
-            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0, original: None };
+            app.mode = Mode::Comment { hunk_idx, input: format!("note {}", hunk_idx), cursor: 0, original: None, line_range: None };
             app.submit_comment();
         }
         app.selected_hunk = 0;
@@ -431,6 +562,7 @@ mod tests {
             input: "line one\nline two\nline three".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two\nline three");
@@ -444,6 +576,7 @@ mod tests {
             input: "\n\nline one\nline two\n\n".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert_eq!(app.notes[0].note, "line one\nline two");
@@ -457,6 +590,7 @@ mod tests {
             input: "\n\n\n".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         assert!(app.notes.is_empty(), "all-whitespace multi-line input should not create a note");
@@ -583,5 +717,259 @@ mod tests {
         let mut app = app_with_diff(1);
         app.delete_selected_note();
         assert!(app.notes.is_empty());
+    }
+
+    // ── line_indices_to_range ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_line_indices_to_range_forward() {
+        use crate::app::notes::line_indices_to_range;
+        use crate::app::LineRange;
+        let hunk = make_rich_hunk("@@ -1,3 +1,3 @@");
+        // hunk.lines[0] is Added (new_lineno=Some(1)), lines[2] is Context (new_lineno=Some(2))
+        let r = line_indices_to_range(&hunk, 0, 2).unwrap();
+        assert_eq!(r, LineRange::new(1, 2));
+    }
+
+    #[test]
+    fn test_line_indices_to_range_reversed_normalizes() {
+        use crate::app::notes::line_indices_to_range;
+        use crate::app::LineRange;
+        let hunk = make_rich_hunk("@@ -1,3 +1,3 @@");
+        let r = line_indices_to_range(&hunk, 2, 0).unwrap();
+        assert_eq!(r, LineRange::new(1, 2));
+    }
+
+    #[test]
+    fn test_line_indices_to_range_single_line() {
+        use crate::app::notes::line_indices_to_range;
+        let hunk = make_rich_hunk("@@ -1,3 +1,3 @@");
+        let r = line_indices_to_range(&hunk, 0, 0).unwrap();
+        assert_eq!(r.start, r.end);
+    }
+
+    #[test]
+    fn test_line_indices_to_range_removed_fallback_to_old_lineno() {
+        use crate::app::notes::line_indices_to_range;
+        use crate::diff::{DiffLine, LineKind};
+        use crate::segment::{RichHunk, RichLine, Segment};
+        use ratatui::style::Color;
+        // Build a hunk with only Removed lines (no new_lineno)
+        let dl = DiffLine { old_lineno: Some(5), new_lineno: None, kind: LineKind::Removed, content: "x".to_string() };
+        let rl = RichLine { diff_line: dl, segments: vec![Segment { content: "x".to_string(), fg: Color::Red, bg: None }] };
+        let hunk = RichHunk { header: "@@ -5,1 +0,0 @@".to_string(), old_start: 5, new_start: 0, lines: vec![rl] };
+        let r = line_indices_to_range(&hunk, 0, 0).unwrap();
+        assert_eq!(r.start, 5);
+    }
+
+    // ── enter_line_select / line_select_up / line_select_down ─────────────────
+
+    #[test]
+    fn test_enter_line_select_sets_mode() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        assert!(matches!(app.mode, Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 }));
+    }
+
+    #[test]
+    fn test_enter_line_select_no_op_without_diff() {
+        let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
+        app.enter_line_select();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_line_select_down_moves_active_line() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_down();
+        assert!(matches!(app.mode, Mode::LineSelect { active_line: 1, .. }));
+    }
+
+    #[test]
+    fn test_line_select_down_clamps_at_last_line() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        for _ in 0..100 { app.line_select_down(); }
+        let last = app.current_rich_diff.as_ref().unwrap().hunks[0].lines.len() - 1;
+        assert!(matches!(app.mode, Mode::LineSelect { active_line, .. } if active_line == last));
+    }
+
+    #[test]
+    fn test_line_select_up_decrements_active_line() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_down();
+        app.line_select_up();
+        assert!(matches!(app.mode, Mode::LineSelect { active_line: 0, .. }));
+    }
+
+    #[test]
+    fn test_line_select_up_clamps_at_zero() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_up();
+        assert!(matches!(app.mode, Mode::LineSelect { active_line: 0, .. }));
+    }
+
+    // ── start_comment_for_selection / delete_note_for_selection ───────────────
+
+    #[test]
+    fn test_start_comment_for_selection_enters_comment_mode_with_range() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_down(); // active_line = 1
+        app.start_comment_for_selection();
+        assert!(matches!(app.mode, Mode::Comment { line_range: Some(_), .. }));
+    }
+
+    #[test]
+    fn test_start_comment_for_selection_edit_path_pre_populates_text() {
+        let mut app = app_with_diff(1);
+        // Create a line-level note first
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "line note".to_string(); }
+        app.submit_comment();
+        assert_eq!(app.notes.len(), 1);
+        // Re-enter line select and start_comment → edit path
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        assert!(matches!(&app.mode, Mode::Comment { input, .. } if input == "line note"));
+    }
+
+    #[test]
+    fn test_delete_note_for_selection_removes_note() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "line note".to_string(); }
+        app.submit_comment();
+        assert_eq!(app.notes.len(), 1);
+        app.enter_line_select();
+        app.delete_note_for_selection();
+        assert!(app.notes.is_empty());
+    }
+
+    #[test]
+    fn test_delete_note_for_selection_leaves_other_range_notes() {
+        let mut app = app_with_diff(1);
+        // Create note on line 0 only (file line 1)
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "note on line 0".to_string(); }
+        app.submit_comment();
+        // Create note on lines 0-2 (file lines 1-2) — must reach index 2 to get a different line number
+        app.enter_line_select();
+        app.line_select_down();
+        app.line_select_down(); // active_line=2, file lineno=2
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "note on lines 0-2".to_string(); }
+        app.submit_comment();
+        assert_eq!(app.notes.len(), 2);
+        // Delete only the line-0 note
+        app.enter_line_select();
+        app.delete_note_for_selection();
+        assert_eq!(app.notes.len(), 1);
+        assert!(app.notes[0].note.contains("0-2"));
+    }
+
+    #[test]
+    fn test_submit_comment_with_line_range_stores_range() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "targeted".to_string(); }
+        app.submit_comment();
+        assert!(app.notes[0].line_range.is_some());
+    }
+
+    #[test]
+    fn test_submit_comment_whole_hunk_stores_none_range() {
+        let mut app = app_with_diff(1);
+        app.start_comment();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "whole hunk".to_string(); }
+        app.submit_comment();
+        assert!(app.notes[0].line_range.is_none());
+    }
+
+    #[test]
+    fn test_submit_comment_line_range_hunk_content_scoped() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select(); // anchor=0, active=0 → just line 0 (Added, new_lineno=Some(1))
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "scoped".to_string(); }
+        app.submit_comment();
+        // hunk_content should include the first line but not all lines
+        let content = &app.notes[0].hunk_content;
+        assert!(content.contains("+new line"), "selected added line should be in content");
+    }
+
+    #[test]
+    fn test_multiple_notes_same_hunk_different_range() {
+        let mut app = app_with_diff(1);
+        // Note on line 0 only (file line 1)
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "note a".to_string(); }
+        app.submit_comment();
+        // Note on lines 0-2 (file lines 1-2) — index 2 gives a new file line number
+        app.enter_line_select();
+        app.line_select_down();
+        app.line_select_down(); // active_line=2
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "note b".to_string(); }
+        app.submit_comment();
+        assert_eq!(app.notes.len(), 2);
+        assert_ne!(app.notes[0].line_range, app.notes[1].line_range);
+    }
+
+    #[test]
+    fn test_selected_range_has_note_true() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "hi".to_string(); }
+        app.submit_comment();
+        app.enter_line_select();
+        assert!(app.selected_range_has_note());
+    }
+
+    #[test]
+    fn test_selected_range_has_note_false_different_range() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "hi".to_string(); }
+        app.submit_comment();
+        // Select a different range: go to index 2 which gives a different file line number
+        app.enter_line_select();
+        app.line_select_down();
+        app.line_select_down(); // active_line=2, file line=2 → range is {1,2}, not {1,1}
+        assert!(!app.selected_range_has_note());
+    }
+
+    #[test]
+    fn test_selected_range_has_note_false_in_normal_mode() {
+        let app = app_with_diff(1);
+        assert!(!app.selected_range_has_note());
+    }
+
+    #[test]
+    fn test_cancel_comment_restores_line_level_note() {
+        let mut app = app_with_diff(1);
+        // Create line-level note
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "original".to_string(); }
+        app.submit_comment();
+        // Edit it
+        app.enter_line_select();
+        app.start_comment_for_selection();
+        // Cancel — original should be restored
+        app.cancel_comment();
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.notes[0].note, "original");
+        assert!(app.notes[0].line_range.is_some());
     }
 }

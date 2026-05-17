@@ -319,19 +319,18 @@ fn push_split_hunk(
         }
     }
 
-    // Notes inline (same as inline view).
+    // Notes at hunk footer. Whole-hunk notes appear first, then line-range notes.
+    let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
     for note in &app.notes {
-        if note.file == file_path && note.hunk_header == hunk.header {
-            let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
-            for (i, line_text) in note.note.lines().enumerate() {
-                let prefix = if i == 0 { "  ◎ " } else { "    " };
-                let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
-                    format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
-                } else {
-                    line_text.to_string()
-                };
-                out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
-            }
+        if note.file != file_path || note.hunk_header != hunk.header { continue; }
+        for (i, line_text) in note.note.lines().enumerate() {
+            let prefix = if i == 0 { "  ◎ " } else { "    " };
+            let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
+                format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
+            } else {
+                line_text.to_string()
+            };
+            out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
         }
     }
     out.push(Line::raw(""));

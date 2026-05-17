@@ -197,6 +197,7 @@ fn run_event_loop<G: GitBackend>(
                     KeyCode::Char('s') if app.focused_panel == Panel::DiffView => {
                         app.toggle_view_mode();
                     }
+                    KeyCode::Char('v') if app.focused_panel == Panel::DiffView => { app.enter_line_select(); }
                     KeyCode::Char('c') if app.focused_panel == Panel::DiffView => { app.start_comment(); }
                     KeyCode::Char(' ') => match app.focused_panel {
                         Panel::FileList  => app.toggle_dir_at_cursor(),
@@ -223,7 +224,18 @@ fn run_event_loop<G: GitBackend>(
                 }
             }
 
-            Mode::Comment { mut input, hunk_idx, mut cursor, original } => {
+            Mode::LineSelect { .. } => {
+                match key.code {
+                    KeyCode::Esc        => { app.mode = crate::app::Mode::Normal; }
+                    KeyCode::Up         => app.line_select_up(),
+                    KeyCode::Down       => app.line_select_down(),
+                    KeyCode::Char('c')  => app.start_comment_for_selection(),
+                    KeyCode::Char('d')  => { app.delete_note_for_selection(); app.mode = crate::app::Mode::Normal; }
+                    _ => {}
+                }
+            }
+
+            Mode::Comment { mut input, hunk_idx, mut cursor, original, line_range } => {
                 let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                 let ctrl  = key.modifiers.contains(KeyModifiers::CONTROL);
                 let (tw, th) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((80, 24));
@@ -240,7 +252,7 @@ fn run_event_loop<G: GitBackend>(
 
                     KeyCode::Char('a') if ctrl => {
                         app.comment_anchor = Some(0); cursor = input.len();
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     KeyCode::Char('c') if ctrl => {
                         if let Some((s, e)) = selected_range(cursor, app.comment_anchor) {
@@ -257,7 +269,7 @@ fn run_event_loop<G: GitBackend>(
                             }
                             input = new_input; cursor = nc; app.comment_anchor = None;
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     KeyCode::Char('v') if ctrl => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
@@ -266,34 +278,34 @@ fn run_event_loop<G: GitBackend>(
                         if let Some(text) = clipboard_get() {
                             for c in text.chars() { input.insert(cursor, c); cursor += c.len_utf8(); }
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     KeyCode::Enter => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
                             input = ni; cursor = nc; app.comment_anchor = None;
                         }
                         input.insert(cursor, '\n'); cursor += 1;
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
 
-                    KeyCode::Up   if shift => { extend!(); cursor = cursor_up_visual(&input, cursor, cw);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Up            => { clear_sel!(); cursor = cursor_up_visual(&input, cursor, cw);   app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Down if shift => { extend!(); cursor = cursor_down_visual(&input, cursor, cw); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Down          => { clear_sel!(); cursor = cursor_down_visual(&input, cursor, cw); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Home if shift => { extend!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Home          => { clear_sel!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::End  if shift => { extend!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::End           => { clear_sel!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Up   if shift => { extend!(); cursor = cursor_up_visual(&input, cursor, cw);   app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Up            => { clear_sel!(); cursor = cursor_up_visual(&input, cursor, cw);   app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Down if shift => { extend!(); cursor = cursor_down_visual(&input, cursor, cw); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Down          => { clear_sel!(); cursor = cursor_down_visual(&input, cursor, cw); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Home if shift => { extend!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Home          => { clear_sel!(); cursor = cursor_home(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::End  if shift => { extend!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::End           => { clear_sel!(); cursor = cursor_end(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
 
-                    KeyCode::Left if ctrl && shift => { extend!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Left if ctrl           => { clear_sel!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Left if shift          => { extend!(); cursor = cursor_prev(&input, cursor);         app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Left                   => { clear_sel!(); cursor = cursor_prev(&input, cursor);         app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Left if ctrl && shift => { extend!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Left if ctrl           => { clear_sel!(); cursor = cursor_word_left(&input, cursor);  app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Left if shift          => { extend!(); cursor = cursor_prev(&input, cursor);         app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Left                   => { clear_sel!(); cursor = cursor_prev(&input, cursor);         app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
 
-                    KeyCode::Right if ctrl && shift => { extend!(); cursor = cursor_word_right(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Right if ctrl           => { clear_sel!(); cursor = cursor_word_right(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Right if shift          => { extend!(); cursor = cursor_next(&input, cursor);          app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
-                    KeyCode::Right                   => { clear_sel!(); cursor = cursor_next(&input, cursor);          app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true }
+                    KeyCode::Right if ctrl && shift => { extend!(); cursor = cursor_word_right(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Right if ctrl           => { clear_sel!(); cursor = cursor_word_right(&input, cursor); app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Right if shift          => { extend!(); cursor = cursor_next(&input, cursor);          app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
+                    KeyCode::Right                   => { clear_sel!(); cursor = cursor_next(&input, cursor);          app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true }
 
                     KeyCode::Backspace => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
@@ -302,7 +314,7 @@ fn run_event_loop<G: GitBackend>(
                             let prev = cursor_prev(&input, cursor);
                             input.drain(prev..cursor); cursor = prev;
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     KeyCode::Delete => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
@@ -311,14 +323,14 @@ fn run_event_loop<G: GitBackend>(
                             let next = cursor_next(&input, cursor);
                             input.drain(cursor..next);
                         }
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     KeyCode::Char(c) if !ctrl => {
                         if let Some((ni, nc)) = delete_selection(&input, cursor, app.comment_anchor) {
                             input = ni; cursor = nc; app.comment_anchor = None;
                         }
                         input.insert(cursor, c); cursor += c.len_utf8();
-                        app.mode = Mode::Comment { hunk_idx, input, cursor, original }; true
+                        app.mode = Mode::Comment { hunk_idx, input, cursor, original, line_range: line_range.clone() }; true
                     }
                     _ => false,
                 };
