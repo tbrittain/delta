@@ -110,7 +110,7 @@ fn fold_rows<'a>(rows: Vec<SideBySideRow<'a>>) -> Vec<SideBySideRow<'a>> {
         if n >= FOLD_THRESHOLD {
             out.push(SideBySideRow::FoldPlaceholder(n));
         } else {
-            out.extend(ctx_run.drain(..));
+            out.append(ctx_run);
         }
         ctx_run.clear();
     };
@@ -245,13 +245,16 @@ pub(crate) fn build_split_diff_text(app: &App, note_max_chars: usize) -> Text<'s
 
     let available = app.diff_view_content_width;
     let (left_col, right_col) = split_column_widths(available);
+    let cols = ColWidths { left: left_col, right: right_col };
 
     for (hunk_idx, hunk) in diff.hunks.iter().enumerate() {
-        push_split_hunk(app, hunk, hunk_idx, &diff.file.path, note_max_chars,
-                        left_col, right_col, &mut lines);
+        push_split_hunk(app, hunk, hunk_idx, &diff.file.path, note_max_chars, cols, &mut lines);
     }
     Text::from(lines)
 }
+
+#[derive(Clone, Copy)]
+struct ColWidths { left: usize, right: usize }
 
 fn push_split_hunk(
     app: &App,
@@ -259,10 +262,10 @@ fn push_split_hunk(
     hunk_idx: usize,
     file_path: &std::path::Path,
     note_max_chars: usize,
-    left_col: usize,
-    right_col: usize,
+    cols: ColWidths,
     out: &mut Vec<Line<'static>>,
 ) {
+    let (left_col, right_col) = (cols.left, cols.right);
     let is_selected = hunk_idx == app.selected_hunk && app.focused_panel == Panel::DiffView;
     let header_style = if is_selected {
         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)

@@ -2,6 +2,17 @@
 
 ## Coding Standards
 
+### Verification before committing
+
+Before committing, run both:
+
+```
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+These are the exact commands CI runs (`test` and `clippy` jobs in `.github/workflows/ci.yml`). Clippy is run with `-D warnings` so any warning is a build failure. Do not commit code that fails either command.
+
 ### Tests are mandatory
 
 Every non-trivial piece of logic must have tests. Do not implement a feature or fix a bug without covering it with tests. Tests are not optional and are not to be added "later."
