@@ -3,11 +3,11 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
-use crate::app::{App, Panel, FOLD_THRESHOLD};
+use crate::app::{App, Mode, Panel, FOLD_THRESHOLD};
 use crate::app::layout::{SPLIT_GUTTER, split_column_widths, split_pair_height};
 use crate::diff::LineKind;
 use crate::segment::{RichHunk, RichLine};
-use super::{ACCENT, MUTED, NOTE_FG};
+use super::{ACCENT, MUTED, NOTE_FG, SEL_BG};
 
 /// Expand tabs to 4 spaces and strip carriage returns.
 fn render_safe(s: &str) -> String {
@@ -144,21 +144,26 @@ fn line_bg(kind: LineKind) -> Option<Color> {
 /// Render one visual sub-row of a column.
 ///
 /// `visual_row_idx` selects which chunk of the line's content to show when
-/// the line is long enough to wrap within the column.  Returns a `Vec<Span>`
-/// that fills exactly `col_width` terminal columns.
+/// the line is long enough to wrap within the column.  `selected` overrides
+/// all backgrounds with `SEL_BG` for line-select highlighting.
+/// Returns a `Vec<Span>` that fills exactly `col_width` terminal columns.
 fn render_column_row(
     rl: Option<&RichLine>,
     visual_row_idx: usize,
     col_width: usize,
+    selected: bool,
 ) -> Vec<Span<'static>> {
     let content_area = col_width.saturating_sub(SPLIT_GUTTER);
 
     let rl = match rl {
-        None => return vec![Span::raw(" ".repeat(col_width))],
+        None => {
+            let style = if selected { Style::default().bg(SEL_BG) } else { Style::default() };
+            return vec![Span::styled(" ".repeat(col_width), style)];
+        }
         Some(r) => r,
     };
 
-    let bg = line_bg(rl.diff_line.kind);
+    let bg = if selected { Some(SEL_BG) } else { line_bg(rl.diff_line.kind) };
     let gutter_style = match bg {
         Some(b) => Style::default().fg(Color::DarkGray).bg(b),
         None    => Style::default().fg(Color::DarkGray),
@@ -204,12 +209,16 @@ fn render_column_row(
             let extracted: String = safe.chars().skip(local_start).take(local_len).collect();
             emitted_chars += extracted.chars().count();
 
-            let style = match seg.bg {
-                Some(b) => Style::default().fg(seg.fg).bg(b),
-                None    => match bg {
+            let style = if selected {
+                Style::default().fg(seg.fg).bg(SEL_BG)
+            } else {
+                match seg.bg {
                     Some(b) => Style::default().fg(seg.fg).bg(b),
-                    None    => Style::default().fg(seg.fg),
-                },
+                    None    => match bg {
+                        Some(b) => Style::default().fg(seg.fg).bg(b),
+                        None    => Style::default().fg(seg.fg),
+                    },
+                }
             };
             spans.push(Span::styled(extracted, style));
         }
@@ -225,6 +234,7 @@ fn render_column_row(
             Some(b) => Style::default().bg(b),
             None    => Style::default(),
         };
+        // bg already reflects SEL_BG when selected, so pad_style is correct.
         spans.push(Span::styled(" ".repeat(remaining), pad_style));
     }
 
@@ -287,6 +297,22 @@ fn push_split_hunk(
         ]));
     }
 
+    let sel_window: Option<(usize, usize)> = match app.mode {
+        Mode::LineSelect { hunk_idx: sel, anchor_line: a, active_line: b } if sel == hunk_idx =>
+            Some((a.min(b), a.max(b))),
+        _ => None,
+    };
+
+    // Return the index of a RichLine within hunk.lines via pointer identity.
+    let line_idx = |rl: &RichLine| -> Option<usize> {
+        hunk.lines.iter().position(|l| std::ptr::eq(l, rl))
+    };
+    let is_selected = |rl: Option<&RichLine>| -> bool {
+        rl.and_then(line_idx)
+            .map(|i| sel_window.is_some_and(|(lo, hi)| i >= lo && i <= hi))
+            .unwrap_or(false)
+    };
+
     let raw_rows = pair_hunk_lines(&hunk.lines);
     let rows = if app.expanded_hunks.contains(&hunk_idx) {
         raw_rows
@@ -304,15 +330,16 @@ fn push_split_hunk(
                     format!("  ·· {} lines of context ··", n), fold_style)));
             }
             SideBySideRow::Content { left, right } => {
+                let selected = is_selected(left) || is_selected(right);
                 let left_content  = left .map(|rl| &rl.diff_line.content as &str);
                 let right_content = right.map(|rl| &rl.diff_line.content as &str);
                 // Use raw content for row count (render_safe is applied per-span).
                 let height = split_pair_height(left_content, right_content, left_col, right_col);
 
                 for v in 0..height {
-                    let mut spans = render_column_row(left, v, left_col);
+                    let mut spans = render_column_row(left, v, left_col, selected);
                     spans.push(divider.clone());
-                    spans.extend(render_column_row(right, v, right_col));
+                    spans.extend(render_column_row(right, v, right_col, selected));
                     out.push(Line::from(spans));
                 }
             }
