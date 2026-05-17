@@ -255,7 +255,7 @@ pub(super) fn status_bar_text(app: &App) -> String {
                 let notes_str = if note_count == 1 { "  ● 1 note".to_string() }
                     else if note_count > 1 { format!("  ● {} notes", note_count) }
                     else { String::new() };
-                let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete" } else { "  c: comment" };
+                let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete  v: select" } else { "  c: comment  v: select" };
                 let fold_hint = if app.selected_hunk_is_foldable() {
                     if app.expanded_hunks.contains(&app.selected_hunk) { "  Space: fold" } else { "  Space: expand" }
                 } else { "" };
