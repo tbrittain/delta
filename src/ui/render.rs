@@ -244,8 +244,8 @@ pub(super) fn status_bar_text(app: &App) -> String {
             Panel::NotesView => " Tab/Shift+Tab: navigate  ↑↓: notes  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string(),
             Panel::DiffView  => {
                 let note_count = app.notes.len();
-                let notes_str = if note_count == 1 { "  ●1 note".to_string() }
-                    else if note_count > 1 { format!("  ●{} notes", note_count) }
+                let notes_str = if note_count == 1 { "  ● 1 note".to_string() }
+                    else if note_count > 1 { format!("  ● {} notes", note_count) }
                     else { String::new() };
                 let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete" } else { "  c: comment" };
                 let fold_hint = if app.selected_hunk_is_foldable() {
@@ -569,7 +569,7 @@ mod tests {
         let mut app = app_diff_view();
         app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
         app.submit_comment();
-        assert!(status_bar_text(&app).contains("●1 note"));
+        assert!(status_bar_text(&app).contains("● 1 note"));
     }
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
             app.selected_hunk = hunk_idx;
         }
         app.selected_hunk = 0;
-        assert!(status_bar_text(&app).contains("●2 notes"));
+        assert!(status_bar_text(&app).contains("● 2 notes"));
     }
 
     #[test]
