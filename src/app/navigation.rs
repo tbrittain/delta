@@ -255,6 +255,73 @@ impl App {
         }).sum()
     }
 
+    /// Returns the index into the selected hunk's lines that is at or just below the
+    /// current scroll position. Used by `enter_line_select` so the cursor starts on a
+    /// visible line rather than the (potentially off-screen) top of the hunk.
+    pub(crate) fn first_visible_hunk_line_idx(&self) -> usize {
+        let Some(ref diff) = self.current_rich_diff else { return 0 };
+        let Some(hunk) = diff.hunks.get(self.selected_hunk) else { return 0 };
+        if hunk.lines.is_empty() { return 0; }
+
+        let hunk_header_row = self.hunk_scroll_offset(self.selected_hunk);
+        // +1: the header line itself occupies one row before the content starts.
+        let first_content_row = hunk_header_row + 1;
+
+        if self.diff_scroll <= first_content_row {
+            return 0;
+        }
+        let rows_into_hunk = self.diff_scroll - first_content_row;
+
+        // Walk hunk lines using the same folding/wrap accounting as the renderer.
+        // For split view this is an approximation (pairs counted individually), but
+        // it's exact for the typical single-row-per-line case.
+        let expanded = self.expanded_hunks.contains(&self.selected_hunk);
+        let pw = self.diff_view_content_width;
+        let mut row = 0usize;
+        let mut ctx_start = 0usize;
+        let mut i = 0usize;
+
+        while i <= hunk.lines.len() {
+            let is_ctx = i < hunk.lines.len()
+                && hunk.lines[i].diff_line.kind == crate::diff::LineKind::Context;
+            if !is_ctx {
+                // Account for the context run [ctx_start, i).
+                let ctx_count = i - ctx_start;
+                if ctx_count > 0 {
+                    let ctx_rows: usize = if !expanded && ctx_count >= crate::app::FOLD_THRESHOLD {
+                        1
+                    } else {
+                        (ctx_start..i)
+                            .map(|j| visual_rows_for_diff_line(&hunk.lines[j].diff_line.content, pw))
+                            .sum()
+                    };
+                    if row + ctx_rows > rows_into_hunk {
+                        // Target row falls inside this context run.
+                        if !expanded && ctx_count >= crate::app::FOLD_THRESHOLD {
+                            return ctx_start; // whole run is a fold placeholder
+                        }
+                        let mut r = row;
+                        for j in ctx_start..i {
+                            let lr = visual_rows_for_diff_line(&hunk.lines[j].diff_line.content, pw);
+                            if r + lr > rows_into_hunk { return j; }
+                            r += lr;
+                        }
+                    }
+                    row += ctx_rows;
+                }
+                // Account for the non-context line at i.
+                if i < hunk.lines.len() {
+                    let lr = visual_rows_for_diff_line(&hunk.lines[i].diff_line.content, pw);
+                    if row + lr > rows_into_hunk { return i; }
+                    row += lr;
+                }
+                ctx_start = i + 1;
+            }
+            i += 1;
+        }
+        hunk.lines.len().saturating_sub(1)
+    }
+
     pub fn toggle_hunk_fold(&mut self) {
         if self.expanded_hunks.contains(&self.selected_hunk) {
             self.expanded_hunks.remove(&self.selected_hunk);
@@ -821,6 +888,64 @@ mod tests {
     fn test_expand_parents_of_root_file_no_op() {
         let mut app = App::new(make_files(1), "main".to_string(), "HEAD".to_string());
         app.expand_parents_of(0);
+    }
+
+    // ── first_visible_hunk_line_idx ───────────────────────────────────────────
+
+    #[test]
+    fn test_first_visible_hunk_line_idx_at_top_returns_zero() {
+        // hunk header is at row 0; diff_scroll=0 → first visible line is index 0
+        let app = app_with_diff(1);
+        assert_eq!(app.first_visible_hunk_line_idx(), 0);
+    }
+
+    #[test]
+    fn test_first_visible_hunk_line_idx_scrolled_past_header_returns_zero() {
+        // diff_scroll=1 means we're at the first content row (header was row 0) → still line 0
+        let mut app = app_with_diff(1);
+        app.diff_scroll = 1;
+        assert_eq!(app.first_visible_hunk_line_idx(), 0);
+    }
+
+    #[test]
+    fn test_first_visible_hunk_line_idx_scrolled_into_hunk() {
+        // make_rich_hunk produces 3 lines; hunk header at row 0, lines at rows 1,2,3.
+        // Scroll to row 2 → first content row past header is row 1 → rows_into_hunk=1 → line index 1.
+        let mut app = app_with_diff(1);
+        app.diff_scroll = 2; // skips header (row 0) and line 0 (row 1); line 1 is at row 2
+        assert_eq!(app.first_visible_hunk_line_idx(), 1);
+    }
+
+    #[test]
+    fn test_first_visible_hunk_line_idx_scrolled_to_last_line() {
+        let mut app = app_with_diff(1);
+        // hunk has 3 lines; header row 0, lines at rows 1,2,3.
+        // Scroll past all content → clamp to last line index.
+        app.diff_scroll = 100;
+        let last = app.current_rich_diff.as_ref().unwrap().hunks[0].lines.len() - 1;
+        assert_eq!(app.first_visible_hunk_line_idx(), last);
+    }
+
+    #[test]
+    fn test_first_visible_hunk_line_idx_second_hunk_scrolled() {
+        // Two hunks; hunk 0 = rows 0..4 (header+3lines+blank), hunk 1 starts at row 5.
+        // selected_hunk=1; diff_scroll=6 → first_content_row of hunk1 = 6 → rows_into_hunk=0 → line 0.
+        let mut app = app_with_diff(2);
+        app.selected_hunk = 1;
+        // hunk_scroll_offset(1) = 5 (hunk0: 1+3+0+1=5)
+        app.diff_scroll = 6; // exactly at hunk1's first content row → line 0
+        assert_eq!(app.first_visible_hunk_line_idx(), 0);
+    }
+
+    #[test]
+    fn test_enter_line_select_starts_at_visible_line() {
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        // Scroll so line 0 of the hunk is above the viewport (diff_scroll=2 → line 1 is first visible)
+        app.diff_scroll = 2;
+        app.enter_line_select();
+        // Cursor should start at line 1, not line 0
+        assert!(matches!(app.mode, crate::app::Mode::LineSelect { anchor_line: 1, active_line: 1, .. }));
     }
 
     #[test]

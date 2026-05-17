@@ -211,10 +211,11 @@ impl App {
             .map(|h| !h.lines.is_empty())
             .unwrap_or(false);
         if has_lines {
+            let start = self.first_visible_hunk_line_idx();
             self.mode = Mode::LineSelect {
                 hunk_idx: self.selected_hunk,
-                anchor_line: 0,
-                active_line: 0,
+                anchor_line: start,
+                active_line: start,
             };
         }
     }
