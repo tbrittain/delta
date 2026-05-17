@@ -119,21 +119,21 @@ mod tests {
     #[test]
     fn test_popup_renders_text() {
         let mut app = make_app(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "review comment".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "review comment".to_string(), cursor: 0, original: None, line_range: None };
         assert!(popup_str(&app).contains("review comment"));
     }
 
     #[test]
     fn test_popup_no_block_cursor() {
         let mut app = make_app(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "hello".to_string(), cursor: 3, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "hello".to_string(), cursor: 3, original: None, line_range: None };
         assert!(!popup_str(&app).contains("█"));
     }
 
     #[test]
     fn test_popup_help_line() {
         let mut app = make_app(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None, line_range: None };
         let s = popup_str(&app);
         assert!(s.contains("Ctrl+S") && s.contains("Esc"));
     }
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn test_popup_title_has_hunk_header() {
         let mut app = make_app(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None, line_range: None };
         assert!(popup_str(&app).contains("@@"));
     }
 
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_popup_multiline() {
         let mut app = make_app(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "line one\nline two".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "line one\nline two".to_string(), cursor: 0, original: None, line_range: None };
         let s = popup_str(&app);
         assert!(s.contains("line one") && s.contains("line two"));
     }

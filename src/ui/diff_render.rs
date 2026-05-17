@@ -3,10 +3,10 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
-use crate::app::{App, Panel, FOLD_THRESHOLD};
+use crate::app::{App, Mode, Panel, FOLD_THRESHOLD};
 use crate::diff::LineKind;
 use crate::segment::{RichHunk, RichLine};
-use super::{ACCENT, MUTED, NOTE_FG};
+use super::{ACCENT, MUTED, NOTE_FG, SEL_BG};
 
 /// Expand tabs to 4 spaces and strip carriage returns so that control
 /// characters in source-code content do not corrupt terminal layout.
@@ -42,13 +42,17 @@ fn gutter(rl: &RichLine) -> (String, String, Option<Color>) {
 
 /// Push one `RichLine` into `out` as a ratatui `Line`.
 ///
-/// The gutter (line number + sigil) always uses the line-level background.
-/// Content segments carry their own fg and bg from the enrichment pipeline.
-pub(super) fn push_diff_line(rl: &RichLine, out: &mut Vec<Line<'static>>) {
+/// When `selected` is true, all spans use `SEL_BG` to indicate line-select
+/// highlighting, overriding the normal diff background.
+pub(super) fn push_diff_line(rl: &RichLine, selected: bool, out: &mut Vec<Line<'static>>) {
     let (lineno_str, prefix, gutter_bg) = gutter(rl);
-    let gutter_style = match gutter_bg {
-        Some(b) => Style::default().fg(Color::DarkGray).bg(b),
-        None    => Style::default().fg(Color::DarkGray),
+    let gutter_style = if selected {
+        Style::default().fg(Color::DarkGray).bg(SEL_BG)
+    } else {
+        match gutter_bg {
+            Some(b) => Style::default().fg(Color::DarkGray).bg(b),
+            None    => Style::default().fg(Color::DarkGray),
+        }
     };
 
     let mut spans = vec![
@@ -58,9 +62,13 @@ pub(super) fn push_diff_line(rl: &RichLine, out: &mut Vec<Line<'static>>) {
     ];
 
     for seg in &rl.segments {
-        let style = match seg.bg {
-            Some(b) => Style::default().fg(seg.fg).bg(b),
-            None    => Style::default().fg(seg.fg),
+        let style = if selected {
+            Style::default().fg(seg.fg).bg(SEL_BG)
+        } else {
+            match seg.bg {
+                Some(b) => Style::default().fg(seg.fg).bg(b),
+                None    => Style::default().fg(seg.fg),
+            }
         };
         spans.push(Span::styled(render_safe(&seg.content), style));
     }
@@ -68,8 +76,33 @@ pub(super) fn push_diff_line(rl: &RichLine, out: &mut Vec<Line<'static>>) {
     out.push(Line::from(spans));
 }
 
+fn push_note_marker(
+    note_text: &str,
+    note_max_chars: usize,
+    out: &mut Vec<Line<'static>>,
+) {
+    let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
+    for (i, line_text) in note_text.lines().enumerate() {
+        let prefix = if i == 0 { "  ◎ " } else { "    " };
+        let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
+            format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
+        } else {
+            line_text.to_string()
+        };
+        out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
+    }
+}
+
 /// Push the lines of a hunk, folding long context runs into a placeholder.
-pub(super) fn push_diff_lines_folded(lines: &[RichLine], out: &mut Vec<Line<'static>>) {
+/// `sel_window` is `Some((lo, hi))` of hunk-line indices to highlight as selected.
+/// After each rendered line, `note_fn` is called with the file line number so that
+/// callers can inject note markers inline.
+pub(super) fn push_diff_lines_folded(
+    lines: &[RichLine],
+    sel_window: Option<(usize, usize)>,
+    mut note_fn: impl FnMut(u32, &mut Vec<Line<'static>>),
+    out: &mut Vec<Line<'static>>,
+) {
     let fold_style = Style::default().fg(Color::DarkGray);
     let mut ctx_start = 0;
     let mut i = 0;
@@ -81,12 +114,21 @@ pub(super) fn push_diff_lines_folded(lines: &[RichLine], out: &mut Vec<Line<'sta
                 out.push(Line::from(Span::styled(
                     format!("  ·· {} lines of context ··", ctx_count), fold_style)));
             } else {
-                for rl in lines.iter().take(i).skip(ctx_start) {
-                    push_diff_line(rl, out);
+                for (j, rl) in lines.iter().enumerate().take(i).skip(ctx_start) {
+                    let selected = sel_window.map(|(lo, hi)| j >= lo && j <= hi).unwrap_or(false);
+                    push_diff_line(rl, selected, out);
+                    if let Some(n) = rl.diff_line.new_lineno {
+                        note_fn(n, out);
+                    }
                 }
             }
             if i < lines.len() {
-                push_diff_line(&lines[i], out);
+                let rl = &lines[i];
+                let selected = sel_window.map(|(lo, hi)| i >= lo && i <= hi).unwrap_or(false);
+                push_diff_line(rl, selected, out);
+                if let Some(n) = rl.diff_line.new_lineno {
+                    note_fn(n, out);
+                }
             }
             ctx_start = i + 1;
         }
@@ -137,26 +179,41 @@ fn push_hunk(
         ]));
     }
 
+    let sel_window: Option<(usize, usize)> = match app.mode {
+        Mode::LineSelect { hunk_idx: sel, anchor_line: a, active_line: b } if sel == hunk_idx =>
+            Some((a.min(b), a.max(b))),
+        _ => None,
+    };
+
+    // Closure that injects line-level note markers after each rendered line.
+    let notes = &app.notes;
+    let hunk_header = hunk.header.clone();
+    let inject_notes = |lineno: u32, out: &mut Vec<Line<'static>>| {
+        for note in notes.iter() {
+            if note.file == file_path && note.hunk_header == hunk_header
+                && note.line_range.as_ref().map(|r| r.end == lineno).unwrap_or(false)
+            {
+                push_note_marker(&note.note, note_max_chars, out);
+            }
+        }
+    };
+
     if app.expanded_hunks.contains(&hunk_idx) {
-        for rl in &hunk.lines {
-            push_diff_line(rl, out);
+        for (i, rl) in hunk.lines.iter().enumerate() {
+            let selected = sel_window.map(|(lo, hi)| i >= lo && i <= hi).unwrap_or(false);
+            push_diff_line(rl, selected, out);
+            if let Some(n) = rl.diff_line.new_lineno {
+                inject_notes(n, out);
+            }
         }
     } else {
-        push_diff_lines_folded(&hunk.lines, out);
+        push_diff_lines_folded(&hunk.lines, sel_window, |n, out| inject_notes(n, out), out);
     }
 
+    // Whole-hunk notes render at the hunk footer.
     for note in &app.notes {
-        if note.file == file_path && note.hunk_header == hunk.header {
-            let note_style = Style::default().fg(NOTE_FG).add_modifier(Modifier::ITALIC);
-            for (i, line_text) in note.note.lines().enumerate() {
-                let prefix = if i == 0 { "  ◎ " } else { "    " };
-                let display = if note_max_chars > 0 && line_text.chars().count() > note_max_chars {
-                    format!("{}…", line_text.chars().take(note_max_chars.saturating_sub(1)).collect::<String>())
-                } else {
-                    line_text.to_string()
-                };
-                out.push(Line::from(Span::styled(format!("{}{}", prefix, display), note_style)));
-            }
+        if note.file == file_path && note.hunk_header == hunk.header && note.line_range.is_none() {
+            push_note_marker(&note.note, note_max_chars, out);
         }
     }
     out.push(Line::raw(""));
@@ -217,14 +274,14 @@ mod tests {
     #[test]
     fn test_comment_not_in_diff_text() {
         let mut app = app_with_diff(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "secret note".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "secret note".to_string(), cursor: 0, original: None, line_range: None };
         assert!(!text_str(&build_diff_text(&app, 1000)).contains("secret note"));
     }
 
     #[test]
     fn test_submitted_note_shown_inline() {
         let mut app = app_with_diff(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "my note".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "my note".to_string(), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         assert!(text_str(&build_diff_text(&app, 1000)).contains("my note"));
     }
@@ -232,7 +289,7 @@ mod tests {
     #[test]
     fn test_inline_note_truncated() {
         let mut app = app_with_diff(1);
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a".repeat(60), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a".repeat(60), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         let c = text_str(&build_diff_text(&app, 20));
         assert!(c.contains("…") && !c.contains(&"a".repeat(21)));
@@ -324,5 +381,80 @@ mod tests {
 
         let c = text_str(&build_diff_text(&app, 1000));
         assert!(c.contains("lines of context") && !c.contains("c0"));
+    }
+
+    // ── Line-select selection highlight ───────────────────────────────────────
+
+    #[test]
+    fn test_line_select_selected_line_uses_sel_bg() {
+        use crate::app::Mode;
+        use super::SEL_BG;
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.mode = Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 };
+        let text = build_diff_text(&app, 1000);
+        // The selected line (index 0) should have SEL_BG on at least one span.
+        let has_sel_bg = text.lines.iter().skip(1).take(1).any(|l| {
+            l.spans.iter().any(|s| s.style.bg == Some(SEL_BG))
+        });
+        assert!(has_sel_bg, "selected line should render with SEL_BG");
+    }
+
+    #[test]
+    fn test_line_select_non_selected_line_no_sel_bg() {
+        use crate::app::Mode;
+        use super::SEL_BG;
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.mode = Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 };
+        let text = build_diff_text(&app, 1000);
+        // Line index 2 (third diff line) is Context; should NOT have SEL_BG
+        let has_sel_bg = text.lines.iter().skip(3).take(1).any(|l| {
+            l.spans.iter().any(|s| s.style.bg == Some(SEL_BG))
+        });
+        assert!(!has_sel_bg, "non-selected line should not render with SEL_BG");
+    }
+
+    // ── Line-level note marker placement ─────────────────────────────────────
+
+    #[test]
+    fn test_line_level_note_marker_appears_inline() {
+        use crate::app::Mode;
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        // Create a line-level note on hunk 0, line 0 (Added, new_lineno=Some(1))
+        app.mode = Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 };
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "inline note".to_string(); }
+        app.submit_comment();
+        let content = text_str(&build_diff_text(&app, 1000));
+        assert!(content.contains("◎"), "note marker should appear");
+        assert!(content.contains("inline note"), "note text should appear");
+    }
+
+    #[test]
+    fn test_whole_hunk_note_marker_at_footer() {
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.mode = Mode::Comment { hunk_idx: 0, input: "whole hunk".to_string(), cursor: 0, original: None, line_range: None };
+        app.submit_comment();
+        let content = text_str(&build_diff_text(&app, 1000));
+        assert!(content.contains("whole hunk"), "whole-hunk note should appear");
+        assert!(content.contains("◎"), "note marker should appear");
+    }
+
+    #[test]
+    fn test_line_level_note_on_one_hunk_not_shown_for_other() {
+        use crate::app::Mode;
+        let mut app = app_with_diff(2);
+        app.focused_panel = crate::app::Panel::DiffView;
+        // Create line-level note on hunk 0
+        app.mode = Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 };
+        app.start_comment_for_selection();
+        if let Mode::Comment { ref mut input, .. } = app.mode { *input = "only on hunk0".to_string(); }
+        app.submit_comment();
+        let content = text_str(&build_diff_text(&app, 1000));
+        // The note should appear exactly once
+        assert_eq!(content.matches("only on hunk0").count(), 1);
     }
 }

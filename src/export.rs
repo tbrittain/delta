@@ -11,10 +11,15 @@ pub fn to_markdown(notes: &[FeedbackNote], from: &str, to: &str) -> String {
     );
 
     for note in notes {
+        let range_str = match &note.line_range {
+            Some(r) => format!(" · L{}–{}", r.start, r.end),
+            None    => String::new(),
+        };
         out.push_str(&format!(
-            "## `{}` · `{}`\n\n",
+            "## `{}` · `{}`{}\n\n",
             note.file.display(),
             note.hunk_header,
+            range_str,
         ));
         out.push_str("```diff\n");
         out.push_str(&note.hunk_content);
@@ -44,8 +49,16 @@ struct JsonExport<'a> {
 struct JsonNote<'a> {
     file: String,
     hunk: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lines: Option<JsonLineRange>,
     code: &'a str,
     note: &'a str,
+}
+
+#[derive(Serialize)]
+struct JsonLineRange {
+    start: u32,
+    end: u32,
 }
 
 pub fn to_json(notes: &[FeedbackNote], from: &str, to: &str) -> Result<String> {
@@ -56,6 +69,7 @@ pub fn to_json(notes: &[FeedbackNote], from: &str, to: &str) -> Result<String> {
             .map(|n| JsonNote {
                 file: n.file.display().to_string(),
                 hunk: &n.hunk_header,
+                lines: n.line_range.as_ref().map(|r| JsonLineRange { start: r.start, end: r.end }),
                 code: &n.hunk_content,
                 note: &n.note,
             })
@@ -76,6 +90,7 @@ mod tests {
             hunk_header: hunk.to_string(),
             hunk_content: code.to_string(),
             note: note.to_string(),
+            line_range: None,
         }
     }
 
@@ -260,5 +275,58 @@ mod tests {
         let json = to_json(&notes, "HEAD^", "HEAD").unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["notes"][0]["note"].as_str().unwrap().contains('\n'));
+    }
+
+    // ── Line-range note export ────────────────────────────────────────────────
+
+    fn make_line_range_note(file: &str, hunk: &str, code: &str, note: &str, start: u32, end: u32) -> FeedbackNote {
+        use crate::app::LineRange;
+        FeedbackNote {
+            file: PathBuf::from(file),
+            hunk_header: hunk.to_string(),
+            hunk_content: code.to_string(),
+            note: note.to_string(),
+            line_range: Some(LineRange::new(start, end)),
+        }
+    }
+
+    #[test]
+    fn test_markdown_line_range_note_has_range_in_heading() {
+        let notes = vec![make_line_range_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "review this", 12, 14)];
+        let md = to_markdown(&notes, "HEAD^", "HEAD");
+        assert!(md.contains("L12–14"), "markdown heading should include line range");
+    }
+
+    #[test]
+    fn test_markdown_whole_hunk_note_no_range_in_heading() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "review this")];
+        let md = to_markdown(&notes, "HEAD^", "HEAD");
+        assert!(!md.contains('L'), "markdown heading should not include line range marker");
+    }
+
+    #[test]
+    fn test_json_line_range_note_has_lines_field() {
+        let notes = vec![make_line_range_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "review", 5, 8)];
+        let json = to_json(&notes, "HEAD^", "HEAD").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let lines = &parsed["notes"][0]["lines"];
+        assert_eq!(lines["start"], 5);
+        assert_eq!(lines["end"], 8);
+    }
+
+    #[test]
+    fn test_json_whole_hunk_note_no_lines_field() {
+        let notes = vec![make_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+log", "review")];
+        let json = to_json(&notes, "HEAD^", "HEAD").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["notes"][0]["lines"].is_null(), "whole-hunk note should not have lines field");
+    }
+
+    #[test]
+    fn test_json_line_range_code_is_scoped() {
+        let notes = vec![make_line_range_note("src/auth.rs", "@@ -1,3 +1,4 @@", "+selected line", "review", 1, 1)];
+        let json = to_json(&notes, "HEAD^", "HEAD").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["notes"][0]["code"], "+selected line");
     }
 }

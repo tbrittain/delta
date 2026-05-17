@@ -34,10 +34,30 @@ pub enum Panel {
     NotesView,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl LineRange {
+    pub fn new(a: u32, b: u32) -> Self {
+        if a <= b { Self { start: a, end: b } } else { Self { start: b, end: a } }
+    }
+    pub fn contains(&self, n: u32) -> bool { n >= self.start && n <= self.end }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Mode {
     #[default]
     Normal,
+    LineSelect {
+        hunk_idx: usize,
+        /// Index into hunk.lines; fixed when `v` is pressed.
+        anchor_line: usize,
+        /// Index into hunk.lines; moves with ↑/↓.
+        active_line: usize,
+    },
     Comment {
         hunk_idx: usize,
         input: String,
@@ -46,6 +66,8 @@ pub enum Mode {
         /// The note being replaced, if this is an edit rather than a new comment.
         /// Restored on Esc so cancelling an edit never loses the original.
         original: Option<FeedbackNote>,
+        /// When Some, this comment targets a line range rather than the full hunk.
+        line_range: Option<LineRange>,
     },
 }
 
@@ -55,6 +77,7 @@ pub struct FeedbackNote {
     pub hunk_header: String,
     pub hunk_content: String,
     pub note: String,
+    pub line_range: Option<LineRange>,
 }
 
 pub struct App {
@@ -99,6 +122,10 @@ pub struct App {
     pub whitespace_mode: WhitespaceMode,
     /// Whether the diff panel shows inline (unified) or side-by-side layout. Toggled with `s`.
     pub view_mode: ViewMode,
+    /// Visible height of the diff panel in terminal rows.
+    /// Updated by the event loop before each draw. Used to scroll the cursor into view
+    /// during line-select mode. Zero means "viewport unknown".
+    pub diff_view_height: usize,
 }
 
 impl App {
@@ -127,6 +154,7 @@ impl App {
             file_list_h_scroll: 0,
             whitespace_mode: WhitespaceMode::None,
             view_mode: ViewMode::Inline,
+            diff_view_height: 0,
         }
     }
 
@@ -217,6 +245,7 @@ pub(crate) mod test_helpers {
             input: "original note".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         app.selected_hunk = hunk_idx;
@@ -237,6 +266,7 @@ pub(crate) mod test_helpers {
             input: "first note".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         app.selected_hunk = 1;
@@ -245,6 +275,7 @@ pub(crate) mod test_helpers {
             input: "second note".to_string(),
             cursor: 0,
             original: None,
+            line_range: None,
         };
         app.submit_comment();
         app.selected_note = 0;
@@ -260,6 +291,7 @@ pub(crate) mod test_helpers {
                 input: format!("note {}", hunk_idx),
                 cursor: 0,
                 original: None,
+                line_range: None,
             };
             app.submit_comment();
         }
@@ -285,5 +317,54 @@ pub(crate) mod test_helpers {
                 content: "x".to_string(),
             })
         }).collect()
+    }
+
+    #[cfg(test)]
+    mod line_range_tests {
+        use super::super::LineRange;
+
+        #[test]
+        fn test_line_range_new_normalizes_order() {
+            let r = LineRange::new(10, 5);
+            assert_eq!(r.start, 5);
+            assert_eq!(r.end, 10);
+        }
+
+        #[test]
+        fn test_line_range_new_forward_unchanged() {
+            let r = LineRange::new(3, 7);
+            assert_eq!(r.start, 3);
+            assert_eq!(r.end, 7);
+        }
+
+        #[test]
+        fn test_line_range_contains_start() {
+            let r = LineRange::new(5, 10);
+            assert!(r.contains(5));
+        }
+
+        #[test]
+        fn test_line_range_contains_end() {
+            let r = LineRange::new(5, 10);
+            assert!(r.contains(10));
+        }
+
+        #[test]
+        fn test_line_range_contains_middle() {
+            let r = LineRange::new(5, 10);
+            assert!(r.contains(7));
+        }
+
+        #[test]
+        fn test_line_range_contains_outside_below() {
+            let r = LineRange::new(5, 10);
+            assert!(!r.contains(4));
+        }
+
+        #[test]
+        fn test_line_range_contains_outside_above() {
+            let r = LineRange::new(5, 10);
+            assert!(!r.contains(11));
+        }
     }
 }

@@ -182,7 +182,11 @@ pub(super) fn render_notes_panel(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
             } else { Style::default().fg(MUTED) };
             let marker = if is_selected { "▶ " } else { "  " };
-            let full_header = format!("{} · {}", note.file.display(), note.hunk_header);
+            let range_str = match &note.line_range {
+                Some(r) => format!(" · L{}–{}", r.start, r.end),
+                None    => String::new(),
+            };
+            let full_header = format!("{} · {}{}", note.file.display(), note.hunk_header, range_str);
             let header_text = if full_header.chars().count() > max_header {
                 format!("{}…", full_header.chars().take(max_header.saturating_sub(1)).collect::<String>())
             } else { full_header };
@@ -239,6 +243,10 @@ pub(super) fn viewport_hscroll(spans: Vec<(String, Style)>, skip: usize, max_wid
 pub(super) fn status_bar_text(app: &App) -> String {
     match app.mode {
         Mode::Comment { .. } => " Ctrl+S: submit   Ctrl+C/V/X: copy/paste/cut   Shift+arrows: select   Esc: cancel".to_string(),
+        Mode::LineSelect { .. } => {
+            let del = if app.selected_range_has_note() { "  d: delete" } else { "" };
+            format!(" ↑↓: move cursor   Shift+↑↓: extend selection   c: comment{}   Esc: cancel", del)
+        }
         Mode::Normal => match app.focused_panel {
             Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: items  ←/→: scroll names  Enter/Space: open/toggle  q: quit".to_string(),
             Panel::NotesView => " Tab/Shift+Tab: navigate  ↑↓: notes  Enter: jump  Space: expand  e: edit  d: delete  q: quit".to_string(),
@@ -247,7 +255,7 @@ pub(super) fn status_bar_text(app: &App) -> String {
                 let notes_str = if note_count == 1 { "  ● 1 note".to_string() }
                     else if note_count > 1 { format!("  ● {} notes", note_count) }
                     else { String::new() };
-                let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete" } else { "  c: comment" };
+                let note_actions = if app.current_hunk_has_note() { "  e: edit  d: delete  v: select" } else { "  c: comment  v: select" };
                 let fold_hint = if app.selected_hunk_is_foldable() {
                     if app.expanded_hunks.contains(&app.selected_hunk) { "  Space: fold" } else { "  Space: expand" }
                 } else { "" };
@@ -349,7 +357,7 @@ mod tests {
     fn app_with_note(note_text: &str) -> App {
         let mut app = make_app_with_hunks(1);
         app.focused_panel = Panel::DiffView;
-        app.mode = Mode::Comment { hunk_idx: 0, input: note_text.to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: note_text.to_string(), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         app.focused_panel = Panel::NotesView;
         app
@@ -430,7 +438,7 @@ mod tests {
     #[test]
     fn test_status_bar_comment_mode() {
         let mut app = app_diff_view();
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None, line_range: None };
         let text = status_bar_text(&app);
         assert!(text.contains("Ctrl+S: submit") && text.contains("Esc: cancel"));
     }
@@ -438,7 +446,7 @@ mod tests {
     #[test]
     fn test_status_bar_comment_mentions_clipboard() {
         let mut app = app_diff_view();
-        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: String::new(), cursor: 0, original: None, line_range: None };
         assert!(status_bar_text(&app).contains("Ctrl+C/V/X"));
     }
 
@@ -450,7 +458,7 @@ mod tests {
     #[test]
     fn test_status_bar_diff_one_note() {
         let mut app = app_diff_view();
-        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "a note".to_string(), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         assert!(status_bar_text(&app).contains("● 1 note"));
     }
@@ -460,7 +468,7 @@ mod tests {
         let mut app = make_app_with_hunks(2);
         app.focused_panel = Panel::DiffView;
         for hunk_idx in [0, 1] {
-            app.mode = Mode::Comment { hunk_idx, input: "note".to_string(), cursor: 0, original: None };
+            app.mode = Mode::Comment { hunk_idx, input: "note".to_string(), cursor: 0, original: None, line_range: None };
             app.submit_comment();
             app.selected_hunk = hunk_idx;
         }
@@ -486,7 +494,7 @@ mod tests {
     #[test]
     fn test_status_bar_note_shows_edit_delete() {
         let mut app = app_diff_view();
-        app.mode = Mode::Comment { hunk_idx: 0, input: "existing".to_string(), cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input: "existing".to_string(), cursor: 0, original: None, line_range: None };
         app.submit_comment();
         let text = status_bar_text(&app);
         assert!(text.contains("e: edit") && text.contains("d: delete") && !text.contains("c: comment"));
@@ -621,6 +629,7 @@ mod tests {
             hunk_header: "@@".to_string(),
             hunk_content: String::new(),
             note: "check this".to_string(),
+            line_range: None,
         });
         assert!(file_list_rendered(&app).contains("●"));
     }

@@ -196,7 +196,7 @@ mod tests {
         let mut app = app_with_diff(1);
         let input = "a\nb\nc\nd\ne".to_string();
         let cursor = input.len();
-        app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor, original: None, line_range: None };
         app.scroll_comment_to_cursor(3, 100);
         assert_eq!(app.comment_scroll, 2);
     }
@@ -205,7 +205,7 @@ mod tests {
     fn test_scroll_comment_to_cursor_no_scroll_when_cursor_visible() {
         let mut app = app_with_diff(1);
         let input = "line1\nline2".to_string();
-        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 5, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 5, original: None, line_range: None };
         app.scroll_comment_to_cursor(5, 100);
         assert_eq!(app.comment_scroll, 0);
     }
@@ -214,7 +214,7 @@ mod tests {
     fn test_scroll_comment_to_cursor_scrolls_up_when_cursor_above_viewport() {
         let mut app = app_with_diff(1);
         let input = "a\nb\nc\nd\ne".to_string();
-        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 0, original: None };
+        app.mode = Mode::Comment { hunk_idx: 0, input, cursor: 0, original: None, line_range: None };
         app.comment_scroll = 3;
         app.scroll_comment_to_cursor(3, 100);
         assert_eq!(app.comment_scroll, 0);
@@ -236,6 +236,7 @@ mod tests {
             input: "aaaaaaaaaa".to_string(),
             cursor: 7,
             original: None,
+            line_range: None,
         };
         app.scroll_comment_to_cursor(1, 5);
         assert_eq!(app.comment_scroll, 1);
@@ -409,6 +410,7 @@ mod tests {
             hunk_header: "@@ -1,1 +1,1 @@".to_string(),
             hunk_content: String::new(),
             note: "single line".to_string(),
+            line_range: None,
         };
         assert_eq!(note_visual_rows(&note, false), 3);
     }
@@ -422,6 +424,7 @@ mod tests {
             hunk_header: "@@ -1,1 +1,1 @@".to_string(),
             hunk_content: String::new(),
             note: "line one\nline two\nline three".to_string(),
+            line_range: None,
         };
         // header(1) + 3 lines + blank(1) = 5
         assert_eq!(note_visual_rows(&note, true), 5);
