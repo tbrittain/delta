@@ -105,10 +105,14 @@ fn run_event_loop<G: GitBackend>(
     git: &G,
 ) -> Result<()> {
     loop {
-        // Keep diff_view_content_width in sync so scroll accounting matches the
-        // wrapped rendering: files panel (32) + diff borders (2) + gutter (6) = 40.
+        // Keep diff_view_content_width and diff_view_height in sync so scroll
+        // accounting matches the rendered layout each frame.
+        // Width: files panel (32) + diff borders (2) + gutter (6) = 40 columns off.
+        // Height: terminal rows − 2 diff borders − 1 status bar − notes panel height.
         if let Ok(s) = terminal.size() {
             app.diff_view_content_width = (s.width as usize).saturating_sub(40);
+            let notes_h: u16 = if app.notes.is_empty() { 0 } else { 10 };
+            app.diff_view_height = s.height.saturating_sub(3 + notes_h) as usize;
         }
         terminal.draw(|f| render::render(f, app))?;
         let Event::Key(key) = event::read()? else { continue; };

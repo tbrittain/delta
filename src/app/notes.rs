@@ -227,6 +227,7 @@ impl App {
             *anchor_line = new_pos;
             *active_line = new_pos;
         }
+        self.scroll_line_select_into_view();
     }
 
     /// Move the cursor down, repositioning both anchor and active (no selection change).
@@ -240,6 +241,7 @@ impl App {
             *anchor_line = new_pos;
             *active_line = new_pos;
         }
+        self.scroll_line_select_into_view();
     }
 
     /// Extend the selection upward (anchor stays, active moves up).
@@ -247,6 +249,7 @@ impl App {
         if let Mode::LineSelect { ref mut active_line, .. } = self.mode {
             *active_line = active_line.saturating_sub(1);
         }
+        self.scroll_line_select_into_view();
     }
 
     /// Extend the selection downward (anchor stays, active moves down).
@@ -258,6 +261,7 @@ impl App {
                 .unwrap_or(0);
             *active_line = (*active_line + 1).min(max);
         }
+        self.scroll_line_select_into_view();
     }
 
     pub fn selected_range_has_note(&self) -> bool {

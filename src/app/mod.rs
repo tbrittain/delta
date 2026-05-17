@@ -122,6 +122,10 @@ pub struct App {
     pub whitespace_mode: WhitespaceMode,
     /// Whether the diff panel shows inline (unified) or side-by-side layout. Toggled with `s`.
     pub view_mode: ViewMode,
+    /// Visible height of the diff panel in terminal rows.
+    /// Updated by the event loop before each draw. Used to scroll the cursor into view
+    /// during line-select mode. Zero means "viewport unknown".
+    pub diff_view_height: usize,
 }
 
 impl App {
@@ -150,6 +154,7 @@ impl App {
             file_list_h_scroll: 0,
             whitespace_mode: WhitespaceMode::None,
             view_mode: ViewMode::Inline,
+            diff_view_height: 0,
         }
     }
 

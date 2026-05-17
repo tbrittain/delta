@@ -1,6 +1,6 @@
 use crate::filetree::TreeItem;
 use crate::ui::split_render::{split_diff_content_lines, split_hunk_scroll_offset};
-use super::{App, FILE_LIST_INNER_WIDTH, ViewMode};
+use super::{App, FILE_LIST_INNER_WIDTH, FOLD_THRESHOLD, Mode, ViewMode};
 use super::layout::{context_run_visual_lines, hunk_has_foldable_context, visual_rows_for_diff_line};
 
 impl App {
@@ -320,6 +320,69 @@ impl App {
             i += 1;
         }
         hunk.lines.len().saturating_sub(1)
+    }
+
+    /// Compute the visual row offset of `target_idx` within the given hunk's content,
+    /// accounting for context folding and line wrapping. Row 0 is the first content line
+    /// (i.e., after the hunk header). Used to scroll the viewport to the cursor in line-select mode.
+    fn visual_row_of_hunk_line(&self, hunk_idx: usize, target_idx: usize) -> usize {
+        let Some(ref diff) = self.current_rich_diff else { return 0 };
+        let Some(hunk) = diff.hunks.get(hunk_idx) else { return 0 };
+
+        let expanded = self.expanded_hunks.contains(&hunk_idx);
+        let pw = self.diff_view_content_width;
+        let mut row = 0usize;
+        let mut ctx_start = 0usize;
+        let mut i = 0usize;
+
+        while i <= hunk.lines.len() {
+            let is_ctx = i < hunk.lines.len()
+                && hunk.lines[i].diff_line.kind == crate::diff::LineKind::Context;
+            if !is_ctx {
+                // Flush context run [ctx_start, i).
+                let ctx_count = i - ctx_start;
+                if ctx_count > 0 {
+                    if !expanded && ctx_count >= FOLD_THRESHOLD {
+                        if target_idx < i {
+                            return row; // target is inside the fold placeholder
+                        }
+                        row += 1;
+                    } else {
+                        for j in ctx_start..i {
+                            if j == target_idx { return row; }
+                            row += visual_rows_for_diff_line(&hunk.lines[j].diff_line.content, pw);
+                        }
+                    }
+                }
+                // Non-context line at i.
+                if i < hunk.lines.len() {
+                    if i == target_idx { return row; }
+                    row += visual_rows_for_diff_line(&hunk.lines[i].diff_line.content, pw);
+                }
+                ctx_start = i + 1;
+            }
+            i += 1;
+        }
+        row
+    }
+
+    /// Adjust `diff_scroll` so the `active_line` of the current line-select cursor
+    /// is within the visible viewport. No-op when not in `LineSelect` mode or when
+    /// `diff_view_height` has not been set yet.
+    pub fn scroll_line_select_into_view(&mut self) {
+        let Mode::LineSelect { hunk_idx, active_line, .. } = self.mode else { return };
+        if self.diff_view_height == 0 { return; }
+
+        // +1 for the hunk header row that precedes content.
+        let content_row = self.hunk_scroll_offset(hunk_idx)
+            + 1
+            + self.visual_row_of_hunk_line(hunk_idx, active_line);
+
+        if content_row < self.diff_scroll {
+            self.diff_scroll = content_row;
+        } else if content_row >= self.diff_scroll + self.diff_view_height {
+            self.diff_scroll = content_row + 1 - self.diff_view_height;
+        }
     }
 
     pub fn toggle_hunk_fold(&mut self) {
@@ -946,6 +1009,78 @@ mod tests {
         app.enter_line_select();
         // Cursor should start at line 1, not line 0
         assert!(matches!(app.mode, crate::app::Mode::LineSelect { anchor_line: 1, active_line: 1, .. }));
+    }
+
+    // ── scroll_line_select_into_view ──────────────────────────────────────────
+
+    #[test]
+    fn test_scroll_line_select_no_op_when_visible() {
+        // hunk header at row 0; line 1 at row 2. With height=5, scroll=0, row 2 is visible.
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.diff_view_height = 5;
+        app.diff_scroll = 0;
+        app.mode = crate::app::Mode::LineSelect { hunk_idx: 0, anchor_line: 1, active_line: 1 };
+        app.scroll_line_select_into_view();
+        assert_eq!(app.diff_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_line_select_scrolls_down_when_cursor_below_viewport() {
+        // line 2 is at content_row = 0 + 1 + 2 = 3. With height=2, scroll=0: 3 >= 0+2 → scroll to 3+1-2=2.
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.diff_view_height = 2;
+        app.diff_scroll = 0;
+        app.mode = crate::app::Mode::LineSelect { hunk_idx: 0, anchor_line: 2, active_line: 2 };
+        app.scroll_line_select_into_view();
+        assert_eq!(app.diff_scroll, 2);
+    }
+
+    #[test]
+    fn test_scroll_line_select_scrolls_up_when_cursor_above_viewport() {
+        // line 0 is at content_row = 0 + 1 + 0 = 1. With scroll=3: 1 < 3 → scroll to 1.
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.diff_view_height = 2;
+        app.diff_scroll = 3;
+        app.mode = crate::app::Mode::LineSelect { hunk_idx: 0, anchor_line: 0, active_line: 0 };
+        app.scroll_line_select_into_view();
+        assert_eq!(app.diff_scroll, 1);
+    }
+
+    #[test]
+    fn test_scroll_line_select_no_op_when_height_zero() {
+        let mut app = app_with_diff(1);
+        app.diff_view_height = 0; // not yet set
+        app.diff_scroll = 0;
+        app.mode = crate::app::Mode::LineSelect { hunk_idx: 0, anchor_line: 2, active_line: 2 };
+        app.scroll_line_select_into_view();
+        assert_eq!(app.diff_scroll, 0);
+    }
+
+    #[test]
+    fn test_line_select_down_scrolls_into_view() {
+        // Enter line-select at line 0; move down twice; cursor should follow.
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.diff_view_height = 2;
+        app.diff_scroll = 0;
+        app.enter_line_select(); // starts at line 0 (row 1)
+        app.line_select_down(); // line 1 (row 2): 2 >= 0+2 → scroll=1
+        assert!(app.diff_scroll >= 1, "scroll should advance when cursor leaves viewport");
+    }
+
+    #[test]
+    fn test_line_select_up_scrolls_into_view() {
+        // Start with cursor at line 2 and scroll showing only bottom. Move up.
+        let mut app = app_with_diff(1);
+        app.focused_panel = crate::app::Panel::DiffView;
+        app.diff_view_height = 2;
+        app.diff_scroll = 3; // showing rows 3-4; line 0 (row 1) is above
+        app.mode = crate::app::Mode::LineSelect { hunk_idx: 0, anchor_line: 2, active_line: 2 };
+        app.line_select_up(); // moves to line 1 (row 2): 2 < 3 → scroll=2
+        assert!(app.diff_scroll <= 2, "scroll should retreat when cursor moves above viewport");
     }
 
     #[test]
