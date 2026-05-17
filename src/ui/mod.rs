@@ -225,12 +225,15 @@ fn run_event_loop<G: GitBackend>(
             }
 
             Mode::LineSelect { .. } => {
+                let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                 match key.code {
-                    KeyCode::Esc        => { app.mode = crate::app::Mode::Normal; }
-                    KeyCode::Up         => app.line_select_up(),
-                    KeyCode::Down       => app.line_select_down(),
-                    KeyCode::Char('c')  => app.start_comment_for_selection(),
-                    KeyCode::Char('d')  => { app.delete_note_for_selection(); app.mode = crate::app::Mode::Normal; }
+                    KeyCode::Esc                  => { app.mode = crate::app::Mode::Normal; }
+                    KeyCode::Up   if shift        => app.line_select_extend_up(),
+                    KeyCode::Down if shift        => app.line_select_extend_down(),
+                    KeyCode::Up                   => app.line_select_up(),
+                    KeyCode::Down                 => app.line_select_down(),
+                    KeyCode::Char('c')            => app.start_comment_for_selection(),
+                    KeyCode::Char('d')            => { app.delete_note_for_selection(); app.mode = crate::app::Mode::Normal; }
                     _ => {}
                 }
             }

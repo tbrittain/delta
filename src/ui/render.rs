@@ -245,7 +245,7 @@ pub(super) fn status_bar_text(app: &App) -> String {
         Mode::Comment { .. } => " Ctrl+S: submit   Ctrl+C/V/X: copy/paste/cut   Shift+arrows: select   Esc: cancel".to_string(),
         Mode::LineSelect { .. } => {
             let del = if app.selected_range_has_note() { "  d: delete" } else { "" };
-            format!(" ↑↓: move selection   c: comment{}   Esc: cancel", del)
+            format!(" ↑↓: move cursor   Shift+↑↓: extend selection   c: comment{}   Esc: cancel", del)
         }
         Mode::Normal => match app.focused_panel {
             Panel::FileList  => " Tab/Shift+Tab: navigate  ↑↓: items  ←/→: scroll names  Enter/Space: open/toggle  q: quit".to_string(),

@@ -219,13 +219,37 @@ impl App {
         }
     }
 
+    /// Move the cursor up, repositioning both anchor and active (no selection change).
     pub fn line_select_up(&mut self) {
+        if let Mode::LineSelect { ref mut anchor_line, ref mut active_line, .. } = self.mode {
+            let new_pos = active_line.saturating_sub(1);
+            *anchor_line = new_pos;
+            *active_line = new_pos;
+        }
+    }
+
+    /// Move the cursor down, repositioning both anchor and active (no selection change).
+    pub fn line_select_down(&mut self) {
+        if let Mode::LineSelect { hunk_idx, ref mut anchor_line, ref mut active_line, .. } = self.mode {
+            let max = self.current_rich_diff.as_ref()
+                .and_then(|d| d.hunks.get(hunk_idx))
+                .map(|h| h.lines.len().saturating_sub(1))
+                .unwrap_or(0);
+            let new_pos = (*active_line + 1).min(max);
+            *anchor_line = new_pos;
+            *active_line = new_pos;
+        }
+    }
+
+    /// Extend the selection upward (anchor stays, active moves up).
+    pub fn line_select_extend_up(&mut self) {
         if let Mode::LineSelect { ref mut active_line, .. } = self.mode {
             *active_line = active_line.saturating_sub(1);
         }
     }
 
-    pub fn line_select_down(&mut self) {
+    /// Extend the selection downward (anchor stays, active moves down).
+    pub fn line_select_extend_down(&mut self) {
         if let Mode::LineSelect { hunk_idx, ref mut active_line, .. } = self.mode {
             let max = self.current_rich_diff.as_ref()
                 .and_then(|d| d.hunks.get(hunk_idx))
@@ -779,11 +803,11 @@ mod tests {
     }
 
     #[test]
-    fn test_line_select_down_moves_active_line() {
+    fn test_line_select_down_moves_cursor_both_anchor_and_active() {
         let mut app = app_with_diff(1);
         app.enter_line_select();
         app.line_select_down();
-        assert!(matches!(app.mode, Mode::LineSelect { active_line: 1, .. }));
+        assert!(matches!(app.mode, Mode::LineSelect { anchor_line: 1, active_line: 1, .. }));
     }
 
     #[test]
@@ -796,12 +820,12 @@ mod tests {
     }
 
     #[test]
-    fn test_line_select_up_decrements_active_line() {
+    fn test_line_select_up_moves_cursor_both_anchor_and_active() {
         let mut app = app_with_diff(1);
         app.enter_line_select();
         app.line_select_down();
         app.line_select_up();
-        assert!(matches!(app.mode, Mode::LineSelect { active_line: 0, .. }));
+        assert!(matches!(app.mode, Mode::LineSelect { anchor_line: 0, active_line: 0, .. }));
     }
 
     #[test]
@@ -812,13 +836,47 @@ mod tests {
         assert!(matches!(app.mode, Mode::LineSelect { active_line: 0, .. }));
     }
 
+    #[test]
+    fn test_line_select_extend_down_moves_only_active() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_extend_down();
+        assert!(matches!(app.mode, Mode::LineSelect { anchor_line: 0, active_line: 1, .. }));
+    }
+
+    #[test]
+    fn test_line_select_extend_up_moves_only_active() {
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_extend_down();
+        app.line_select_extend_down();
+        app.line_select_extend_up();
+        assert!(matches!(app.mode, Mode::LineSelect { anchor_line: 0, active_line: 1, .. }));
+    }
+
+    #[test]
+    fn test_reposition_then_extend_gives_non_zero_start_range() {
+        use crate::app::notes::line_indices_to_range;
+        let mut app = app_with_diff(1);
+        app.enter_line_select();
+        app.line_select_down(); // cursor at index 1 (anchor=1, active=1)
+        app.line_select_extend_down(); // extend to index 2 (anchor=1, active=2)
+        if let Mode::LineSelect { hunk_idx, anchor_line, active_line } = app.mode {
+            let hunk = &app.current_rich_diff.as_ref().unwrap().hunks[hunk_idx];
+            let range = line_indices_to_range(hunk, anchor_line, active_line).unwrap();
+            assert!(range.start > 0, "range should not start at line 0 after repositioning");
+        } else {
+            panic!("expected LineSelect mode");
+        }
+    }
+
     // ── start_comment_for_selection / delete_note_for_selection ───────────────
 
     #[test]
     fn test_start_comment_for_selection_enters_comment_mode_with_range() {
         let mut app = app_with_diff(1);
         app.enter_line_select();
-        app.line_select_down(); // active_line = 1
+        app.line_select_extend_down(); // extend selection to active_line=1
         app.start_comment_for_selection();
         assert!(matches!(app.mode, Mode::Comment { line_range: Some(_), .. }));
     }
